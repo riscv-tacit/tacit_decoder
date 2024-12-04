@@ -10,3 +10,5 @@ target-rust-analyzer/
 **/*.rs.bk
 
 *.dump
+*.txt
+*.json
