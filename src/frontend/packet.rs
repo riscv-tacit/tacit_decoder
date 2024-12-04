@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{Read, BufReader};
+use anyhow::Result;
 
 const C_HEADER_MASK: u8 = 0b0000_0011;
 const C_TIMESTAMP_MASK: u8 = 0b1111_1100;
@@ -15,7 +16,7 @@ const VAR_OFFSET: u8 = 7;
 const VAR_VAL_MASK: u8 = 0b0111_1111;
 
 #[derive(Debug, Clone)]
-enum CHeader {
+pub enum CHeader {
     CTb = 0b00, // taken branch
     CNt = 0b01, // not taken branch
     CNa = 0b10, // not applicable
@@ -99,7 +100,8 @@ pub struct Packet {
     pub c_header: CHeader,
     pub f_header: FHeader,
     pub trap_type: TrapType,
-    pub address: u64,
+    pub target_address: u64,
+    pub trap_address: u64,
     pub timestamp: u64,
 }
 
@@ -111,19 +113,20 @@ impl Packet {
             c_header: CHeader::CNa,
             f_header: FHeader::FRes,
             trap_type: TrapType::TNone,
-            address: 0,
+            target_address: 0,
+            trap_address: 0,
             timestamp: 0,
         }
     }
 }
 
-fn read_u8(stream: &mut BufReader<File>) -> Result<u8, Box<dyn std::error::Error>> {
+fn read_u8(stream: &mut BufReader<File>) -> Result<u8> {
     let mut buf = [0u8; 1];
     stream.read_exact(&mut buf)?;
     Ok(buf[0])
 }
 
-fn read_varint(stream: &mut BufReader<File>) -> Result<u64, Box<dyn std::error::Error>> {
+fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
     let mut result = Vec::new();
     loop {
         let byte = read_u8(stream)?;
@@ -133,7 +136,7 @@ fn read_varint(stream: &mut BufReader<File>) -> Result<u64, Box<dyn std::error::
     Ok(result.iter().rev().fold(0, |acc, &x| (acc << VAR_OFFSET) | (x & VAR_VAL_MASK) as u64))
 } 
 
-pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::error::Error>> {
+pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
     println!("first_byte: {:08b}", first_byte);
@@ -157,16 +160,16 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FUj => {
-                    let address = read_varint(stream)?;
-                    packet.address = address;
+                    let target_address = read_varint(stream)?;
+                    packet.target_address = target_address;
                     let timestamp = read_varint(stream)?;
                     packet.timestamp = timestamp;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FSync => {
-                    let address = read_varint(stream)?;
-                    packet.address = address;
+                    let target_address = read_varint(stream)?;
+                    packet.target_address = target_address;
                     let timestamp = read_varint(stream)?;
                     packet.timestamp = timestamp;
                     packet.f_header = f_header;
@@ -175,8 +178,10 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                 FHeader::FTrap => {
                     let trap_type = TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
                     packet.trap_type = trap_type;
-                    let address = read_varint(stream)?;
-                    packet.address = address;
+                    let trap_address = read_varint(stream)?;
+                    packet.trap_address = trap_address;
+                    let target_address = read_varint(stream)?;
+                    packet.target_address = target_address;
                     let timestamp = read_varint(stream)?;
                     packet.timestamp = timestamp;
                     packet.f_header = f_header;

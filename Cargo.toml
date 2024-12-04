@@ -9,5 +9,6 @@ authors = ["iansseijelly"]
 object = "0.36"
 capstone = "0.12"
 clap = { version = "4.5.18", features = ["derive"] }
-
-
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+bus = "2.4.1"
+anyhow = "1.0"
