@@ -10,6 +10,7 @@ mod backend {
     pub mod abstract_receiver;
     pub mod event;
     pub mod txt_receiver;
+    pub mod json_receiver;
 }
 use frontend::packet::FHeader;
 use std::fs::File;
@@ -21,8 +22,9 @@ use capstone::arch::riscv::{ArchMode, ArchExtraMode};
 use capstone::Insn;
 use object::{Object, ObjectSection};
 use bus::Bus;
-use backend::event::Entry;
+use backend::event::{Entry, Event};
 use backend::txt_receiver::TxtReceiver;
+use backend::json_receiver::JsonReceiver;
 use backend::abstract_receiver::AbstractReceiver;
 use std::thread;
 use anyhow::Result;
@@ -160,7 +162,7 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
     print_verbose(&format!("packet: {:?}", packet), args.verbose);
     let mut pc = refund_addr(packet.target_address);
     let mut timestamp = packet.timestamp;
-    bus.broadcast(Entry::new_timestamp(packet.timestamp));
+    bus.broadcast(Entry::new_timed_event(Event::Start, packet.timestamp, pc, 0));
 
     while let Ok(packet) = frontend::packet::read_packet(&mut encoded_trace_reader) {
         // special handling for the last packet, should be unlikely hinted
@@ -168,39 +170,45 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
         if packet.f_header == FHeader::FSync {
             pc = step_bb_until(pc, &insn_map, refund_addr(packet.target_address), &mut bus);
             println!("detected FSync packet, trace ending!");
-            bus.broadcast(Entry::new_timestamp(packet.timestamp));
+            bus.broadcast(Entry::new_timed_event(Event::End, packet.timestamp, pc, 0));
             break;
         } else if packet.f_header == FHeader::FTrap {
-            bus.broadcast(Entry::new_trap(packet.trap_type));
+            bus.broadcast(Entry::new_timed_trap(packet.trap_type, packet.timestamp, pc, packet.trap_address));
             pc = step_bb_until(pc, &insn_map, packet.trap_address, &mut bus);
             pc = refund_addr(packet.target_address ^ (pc >> 1));
             timestamp += packet.timestamp;
-            bus.broadcast(Entry::new_timestamp(timestamp));
         } else {
             pc = step_bb(pc, &insn_map, &mut bus);
             let insn_to_resolve = insn_map.get(&pc).unwrap();
-            // println!("insn_to_resolve: {}", insn_to_resolve.mnemonic().unwrap());
-            println!("pc: {:x}", pc);
-            // println!("packet: {:?}", packet);
+            print_verbose(&format!("pc: {:x}", pc), args.verbose);
+            timestamp += packet.timestamp;
             match packet.f_header {
                 FHeader::FTb => {
                     assert!(BRANCH_OPCODES.contains(&insn_to_resolve.mnemonic().unwrap()));
-                    pc = (pc as i64 + compute_offset(insn_to_resolve) as i64) as u64;
+                    let new_pc = (pc as i64 + compute_offset(insn_to_resolve) as i64) as u64;
+                    bus.broadcast(Entry::new_timed_event(Event::TakenBranch, timestamp, pc, new_pc));
+                    pc = new_pc;
                 }
                 FHeader::FNt => {
                     assert!(BRANCH_OPCODES.contains(&insn_to_resolve.mnemonic().unwrap()));
-                    pc = pc + insn_to_resolve.len() as u64;
+                    let new_pc = pc + insn_to_resolve.len() as u64;
+                    bus.broadcast(Entry::new_timed_event(Event::NonTakenBranch, timestamp, pc, new_pc));
+                    pc = new_pc;
                 }
                 FHeader::FIj => {
                     assert!(JUMP_OPCODES.contains(&insn_to_resolve.mnemonic().unwrap()));
-                    pc = (pc as i64 + compute_offset(insn_to_resolve) as i64) as u64;
+                    let new_pc = (pc as i64 + compute_offset(insn_to_resolve) as i64) as u64;
+                    bus.broadcast(Entry::new_timed_event(Event::InferrableJump, timestamp, pc, new_pc));
+                    pc = new_pc;
                 }
                 FHeader::FUj => {
                     assert!(JUMP_OPCODES.contains(&insn_to_resolve.mnemonic().unwrap()));
-                    pc = refund_addr(packet.target_address ^ (pc >> 1));
+                    let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
+                    bus.broadcast(Entry::new_timed_event(Event::UninferableJump, timestamp, pc, new_pc));
+                    pc = new_pc;
                 }
                 FHeader::FTrap => {
-                    bus.broadcast(Entry::new_trap(packet.trap_type));
+                    bus.broadcast(Entry::new_timed_trap(packet.trap_type, packet.timestamp, pc, packet.trap_address));
                     pc = refund_addr(packet.target_address ^ (pc >> 1));
                 }
                 _ => {
@@ -208,8 +216,6 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
                 }
             }
             // log the timestamp
-            timestamp += packet.timestamp;
-            bus.broadcast(Entry::new_timestamp(timestamp));
         }
     }
 
@@ -229,6 +235,12 @@ fn main() -> Result<()> {
     if args.to_txt {
         let mut txt_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(TxtReceiver::new(txt_bus_endpoint)));
+    }
+
+    // add a receiver to the bus for json output
+    if args.to_json {
+        let mut json_bus_endpoint = bus.add_rx();
+        receivers.push(Box::new(JsonReceiver::new(json_bus_endpoint)));
     }
 
     let frontend_handle = thread::spawn(move || trace_decoder(&args, bus));

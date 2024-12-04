@@ -27,12 +27,9 @@ impl AbstractReceiver for TxtReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry.event {
-            Event::Timestamp => {
-                self.writer.write_all(format!("[timestamp] {}", entry.timestamp.unwrap()).as_bytes()).unwrap();
-                self.writer.write_all(b"\n").unwrap();
-            }
-            _ => {
-                self.writer.write_all(format!("{:#x}:", entry.pc).as_bytes()).unwrap();
+            Event::None => {
+                // only arc.0 is used for none type events
+                self.writer.write_all(format!("{:#x}:", entry.arc.0).as_bytes()).unwrap();
                 if let Some(insn_mnemonic) = entry.insn_mnemonic {
                     self.writer.write_all(format!(" {}", insn_mnemonic).as_bytes()).unwrap();
                     if let Some(insn_op_str) = entry.insn_op_str {
@@ -40,6 +37,14 @@ impl AbstractReceiver for TxtReceiver {
                     }
                 }
                 self.writer.write_all(b"\n").unwrap();
+            }
+            _ => {
+                if let Some(timestamp) = entry.timestamp {
+                    self.writer.write_all(format!("[timestamp: {}]", timestamp).as_bytes()).unwrap();
+                    // write the event
+                    self.writer.write_all(format!(" {}", entry.event.to_string()).as_bytes()).unwrap();
+                    self.writer.write_all(b"\n").unwrap();
+                }
             }
         }
     }
