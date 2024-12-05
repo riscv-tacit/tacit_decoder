@@ -11,6 +11,7 @@ mod backend {
     pub mod event;
     pub mod txt_receiver;
     pub mod json_receiver;
+    pub mod afdo_receiver;
 }
 use frontend::packet::FHeader;
 use std::fs::File;
@@ -25,6 +26,7 @@ use bus::Bus;
 use backend::event::{Entry, Event};
 use backend::txt_receiver::TxtReceiver;
 use backend::json_receiver::JsonReceiver;
+use backend::afdo_receiver::AfdoReceiver;
 use backend::abstract_receiver::AbstractReceiver;
 use std::thread;
 use anyhow::Result;
@@ -59,6 +61,9 @@ struct Args {
     #[arg(long, default_value_t = false)]
     // print the decoded trace in JSON format
     to_json: bool,
+    #[arg(long, default_value_t = false)]
+    // output the decoded trace in afdo format
+    to_afdo: bool,
 }
 
 fn refund_addr(addr: u64) -> u64 {
@@ -114,9 +119,7 @@ fn step_bb_until(pc: u64, insn_map: &HashMap<u64, &Insn>, target_pc: u64, bus: &
         let insn = insn_map.get(&pc).unwrap();
         bus.broadcast(Entry::new_insn(insn));
         if BRANCH_OPCODES.contains(&insn.mnemonic().unwrap()) || JUMP_OPCODES.contains(&insn.mnemonic().unwrap()) {
-            if pc != target_pc {
-                panic!("unexpected branch/jump when handling FSync packet at pc: {}", pc);
-            }
+            break;
         }
         pc += insn.len() as u64;
         if pc == target_pc {
@@ -241,6 +244,16 @@ fn main() -> Result<()> {
     if args.to_json {
         let json_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(JsonReceiver::new(json_bus_endpoint)));
+    }
+
+    if args.to_afdo {
+        let afdo_bus_endpoint = bus.add_rx();
+        let mut elf_file = File::open(args.binary.clone())?;
+        let mut elf_buffer = Vec::new();
+        elf_file.read_to_end(&mut elf_buffer)?;
+        let elf = object::File::parse(&*elf_buffer)?;
+        receivers.push(Box::new(AfdoReceiver::new(afdo_bus_endpoint, elf.entry().clone())));
+        drop(elf_file);
     }
 
     let frontend_handle = thread::spawn(move || trace_decoder(&args, bus));
