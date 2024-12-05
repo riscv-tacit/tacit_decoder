@@ -233,13 +233,13 @@ fn main() -> Result<()> {
     
     // add a receiver to the bus for txt output
     if args.to_txt {
-        let mut txt_bus_endpoint = bus.add_rx();
+        let txt_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(TxtReceiver::new(txt_bus_endpoint)));
     }
 
     // add a receiver to the bus for json output
     if args.to_json {
-        let mut json_bus_endpoint = bus.add_rx();
+        let json_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(JsonReceiver::new(json_bus_endpoint)));
     }
 

@@ -10,7 +10,7 @@ const TRAP_TYPE_MASK: u8 = 0b1110_0000;
 const TRAP_TYPE_OFFSET: u8 = 5;
 
 const VAR_MASK: u8 = 0b1000_0000;
-const VAR_CONT: u8 = 0b0000_0000;
+// const VAR_CONT: u8 = 0b0000_0000;
 const VAR_LAST: u8 = 0b1000_0000;
 const VAR_OFFSET: u8 = 7;
 const VAR_VAL_MASK: u8 = 0b0111_1111;
