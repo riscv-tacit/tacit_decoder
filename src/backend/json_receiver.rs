@@ -33,4 +33,8 @@ impl AbstractReceiver for JsonReceiver {
             }
         }
     }
+
+    fn _flush(&mut self) {
+        self.writer.flush().unwrap();
+    }
 }

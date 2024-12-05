@@ -19,6 +19,7 @@ pub trait AbstractReceiver: Send + 'static {
                 }
                 // if the bus is disconnected, we're done!
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self._flush();
                     return;
                 }
                 // if the bus is empty, yield until later
@@ -30,4 +31,5 @@ pub trait AbstractReceiver: Send + 'static {
     }
     fn _bump_checksum(&mut self);
     fn _receive_entry(&mut self, entry: Entry);
+    fn _flush(&mut self);
 }

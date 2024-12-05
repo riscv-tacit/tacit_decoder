@@ -48,4 +48,8 @@ impl AbstractReceiver for TxtReceiver {
             }
         }
     }
+
+    fn _flush(&mut self) {
+        self.writer.flush().unwrap();
+    }
 }
