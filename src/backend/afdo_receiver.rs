@@ -5,18 +5,6 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::collections::HashMap;
 
-
-// struct gcov_info {
-// 	gcov_unsigned_t version;
-// 	struct gcov_info *next;
-// 	gcov_unsigned_t stamp;
-// 	gcov_unsigned_t checksum;
-// 	const char *filename;
-// 	gcov_merge_fn merge[GCOV_COUNTERS];
-// 	unsigned n_functions;
-// 	struct gcov_fn_info **functions;
-// };
-
 pub struct AfdoReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
