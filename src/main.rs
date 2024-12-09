@@ -2,7 +2,8 @@ extern crate clap;
 extern crate object;
 extern crate capstone;
 extern crate bus;
-
+extern crate log;
+extern crate env_logger;
 mod frontend {
     pub mod packet;
 }
@@ -12,6 +13,7 @@ mod backend {
     pub mod txt_receiver;
     pub mod json_receiver;
     pub mod afdo_receiver;
+    pub mod gcda_receiver;
 }
 use frontend::packet::FHeader;
 use std::fs::File;
@@ -30,6 +32,7 @@ use backend::afdo_receiver::AfdoReceiver;
 use backend::abstract_receiver::AbstractReceiver;
 use std::thread;
 use anyhow::Result;
+use log::trace;
 
 const BRANCH_OPCODES: &[&str] = &["beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez",
                                 "bgez", "blez", "bltz", "bgtz", "bgt", "ble", "bgtu", "bleu",
@@ -40,29 +43,26 @@ const BUS_SIZE: usize = 1024;
 #[derive(Clone, Parser)]
 #[command(name = "trace-decoder", version = "0.1.0", about = "Decode trace files")]
 struct Args {
-    #[arg(short, long)]
     // path to the encoded trace file
-    encoded_trace: String,
     #[arg(short, long)]
+    encoded_trace: String,
     // path to the binary file
+    #[arg(short, long)]
     binary: String,
-    #[arg(short, long, default_value_t = false)]
-    // print verbose messages
-    verbose: bool,
-    #[arg(short, long, default_value_t = String::from("trace.dump"))]
     // path to the decoded trace file
+    #[arg(short, long, default_value_t = String::from("trace.dump"))]
     decoded_trace: String,
-    #[arg(short, long, default_value_t = false)]
     // print the timestamp in the decoded trace file
+    #[arg(short, long, default_value_t = false)]
     timestamp: bool,
-    #[arg(long, default_value_t = true)]
     // output the decoded trace in text format
+    #[arg(long, default_value_t = true)]
     to_txt: bool,
+    // output the decoded trace in JSON format
     #[arg(long, default_value_t = false)]
-    // print the decoded trace in JSON format
     to_json: bool,
-    #[arg(long, default_value_t = false)]
     // output the decoded trace in afdo format
+    #[arg(long, default_value_t = false)]
     to_afdo: bool,
 }
 
@@ -150,7 +150,7 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
         .build()?;
 
     let decoded_instructions = cs.disasm_all(&text_data, entry_point)?;
-    print_verbose(&format!("found {} instructions", decoded_instructions.len()), args.verbose);
+    trace!("found {} instructions", decoded_instructions.len());
 
     // create a map of address to instruction 
     let mut insn_map : HashMap<u64, &Insn> = HashMap::new();
@@ -162,14 +162,14 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
     let mut encoded_trace_reader : BufReader<File> = BufReader::new(encoded_trace_file);
 
     let packet = frontend::packet::read_packet(&mut encoded_trace_reader)?;
-    print_verbose(&format!("packet: {:?}", packet), args.verbose);
+    trace!("packet: {:?}", packet);
     let mut pc = refund_addr(packet.target_address);
     let mut timestamp = packet.timestamp;
     bus.broadcast(Entry::new_timed_event(Event::Start, packet.timestamp, pc, 0));
 
     while let Ok(packet) = frontend::packet::read_packet(&mut encoded_trace_reader) {
         // special handling for the last packet, should be unlikely hinted
-        print_verbose(&format!("packet: {:?}", packet), args.verbose);
+        trace!("packet: {:?}", packet);
         if packet.f_header == FHeader::FSync {
             pc = step_bb_until(pc, &insn_map, refund_addr(packet.target_address), &mut bus);
             println!("detected FSync packet, trace ending!");
@@ -183,7 +183,7 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
         } else {
             pc = step_bb(pc, &insn_map, &mut bus);
             let insn_to_resolve = insn_map.get(&pc).unwrap();
-            print_verbose(&format!("pc: {:x}", pc), args.verbose);
+            trace!("pc: {:x}", pc);
             timestamp += packet.timestamp;
             match packet.f_header {
                 FHeader::FTb => {
@@ -229,6 +229,7 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    env_logger::init();
     let args = Args::parse();
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);

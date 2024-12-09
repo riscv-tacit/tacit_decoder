@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{Read, BufReader};
 use anyhow::Result;
-
+use log::trace;
 const C_HEADER_MASK: u8 = 0b0000_0011;
 const C_TIMESTAMP_MASK: u8 = 0b1111_1100;
 const F_HEADER_MASK: u8 = 0b0001_1100;
@@ -139,7 +139,7 @@ fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
 pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
-    println!("first_byte: {:08b}", first_byte);
+    trace!("first_byte: {:08b}", first_byte);
     let c_header = CHeader::from(first_byte & C_HEADER_MASK);
     match c_header {
         CHeader::CTb | CHeader::CNt | CHeader::CIj => {
