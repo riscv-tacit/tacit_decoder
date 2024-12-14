@@ -4,6 +4,7 @@ extern crate capstone;
 extern crate bus;
 extern crate log;
 extern crate env_logger;
+extern crate gcno_reader;
 mod frontend {
     pub mod packet;
 }
@@ -30,10 +31,10 @@ use backend::txt_receiver::TxtReceiver;
 use backend::json_receiver::JsonReceiver;
 use backend::afdo_receiver::AfdoReceiver;
 use backend::abstract_receiver::AbstractReceiver;
+use backend::gcda_receiver::GcdaReceiver;
 use std::thread;
 use anyhow::Result;
 use log::trace;
-
 const BRANCH_OPCODES: &[&str] = &["beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez",
                                 "bgez", "blez", "bltz", "bgtz", "bgt", "ble", "bgtu", "bleu",
                                 "c.beqz", "c.bnez", "c.bltz", "c.bgez"];
@@ -64,23 +65,25 @@ struct Args {
     // output the decoded trace in afdo format
     #[arg(long, default_value_t = false)]
     to_afdo: bool,
+    // path to the gcno file
+    #[arg(long, default_value_t = String::from(""))]
+    gcno: String,
+    // output the decoded trace in gcda format
+    #[arg(long, default_value_t = false)]
+    to_gcda: bool,
 }
 
 fn refund_addr(addr: u64) -> u64 {
     addr << 1
 }
 
-fn print_verbose(msg: &str, verbose: bool) {
-    if verbose {
-        println!("{}", msg);
-    }
-}
-
 // FIXME: hacky way to get the offset operand, always the last one
 fn compute_offset(insn: &Insn) -> i64 {
+    trace!("insn: {:?}", insn);
     let offset = insn.op_str().unwrap().split(",").last().unwrap();
     // remove leading spaces
     let offset = offset.trim();
+    trace!("offset: {:?}", offset);
     let offset_value: i64;
     if offset.starts_with("-0x") {
         offset_value = i64::from_str_radix(&offset[3..], 16).unwrap() * -1;
@@ -257,11 +260,17 @@ fn main() -> Result<()> {
         drop(elf_file);
     }
 
+    if args.to_gcda {
+        let gcda_bus_endpoint = bus.add_rx();
+        receivers.push(Box::new(GcdaReceiver::new(gcda_bus_endpoint, args.gcno.clone(), args.binary.clone())));
+    }
+
     let frontend_handle = thread::spawn(move || trace_decoder(&args, bus));
     let receiver_handles: Vec<_> = receivers.into_iter()
         .map(|mut receiver| thread::spawn(move || receiver.try_receive_loop()))
         .collect();
 
+    // instead of unwrap, report the error
     frontend_handle.join().unwrap()?;
     for handle in receiver_handles {
         handle.join().unwrap();
