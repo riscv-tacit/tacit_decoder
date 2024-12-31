@@ -15,6 +15,7 @@ mod backend {
     pub mod json_receiver;
     pub mod afdo_receiver;
     pub mod gcda_receiver;
+    pub mod speedscope_receiver;
 }
 use frontend::packet::FHeader;
 use std::fs::File;
@@ -32,6 +33,7 @@ use backend::json_receiver::JsonReceiver;
 use backend::afdo_receiver::AfdoReceiver;
 use backend::abstract_receiver::AbstractReceiver;
 use backend::gcda_receiver::GcdaReceiver;
+use backend::speedscope_receiver::SpeedscopeReceiver;
 use std::thread;
 use anyhow::Result;
 use log::trace;
@@ -65,12 +67,15 @@ struct Args {
     // output the decoded trace in afdo format
     #[arg(long, default_value_t = false)]
     to_afdo: bool,
-    // path to the gcno file
+    // path to the gcno file, must be provided if to_afdo is true
     #[arg(long, default_value_t = String::from(""))]
     gcno: String,
     // output the decoded trace in gcda format
     #[arg(long, default_value_t = false)]
     to_gcda: bool,
+    // output the decoded trace in speedscope format
+    #[arg(long, default_value_t = false)]
+    to_speedscope: bool,
 }
 
 fn refund_addr(addr: u64) -> u64 {
@@ -263,6 +268,11 @@ fn main() -> Result<()> {
     if args.to_gcda {
         let gcda_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(GcdaReceiver::new(gcda_bus_endpoint, args.gcno.clone(), args.binary.clone())));
+    }
+
+    if args.to_speedscope {
+        let speedscope_bus_endpoint = bus.add_rx();
+        receivers.push(Box::new(SpeedscopeReceiver::new(speedscope_bus_endpoint, args.binary.clone())));
     }
 
     let frontend_handle = thread::spawn(move || trace_decoder(&args, bus));

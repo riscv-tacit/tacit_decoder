@@ -17,6 +17,7 @@ impl JsonReceiver {
 }
 
 impl AbstractReceiver for JsonReceiver {
+
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {
         &mut self.receiver.bus_rx
     }

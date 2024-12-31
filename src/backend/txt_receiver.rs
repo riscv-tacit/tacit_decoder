@@ -17,6 +17,7 @@ impl TxtReceiver {
 }
 
 impl AbstractReceiver for TxtReceiver {
+
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {
         &mut self.receiver.bus_rx
     }

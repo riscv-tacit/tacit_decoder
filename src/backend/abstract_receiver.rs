@@ -29,7 +29,10 @@ pub trait AbstractReceiver: Send + 'static {
             }
         }
     }
+    // unused
     fn _bump_checksum(&mut self);
+    // step through the trace
     fn _receive_entry(&mut self, entry: Entry);
+    // any final actions
     fn _flush(&mut self);
 }

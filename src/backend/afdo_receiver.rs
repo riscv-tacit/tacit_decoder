@@ -26,6 +26,7 @@ impl AfdoReceiver {
 }
 
 impl AbstractReceiver for AfdoReceiver {
+
   fn bus_rx(&mut self) -> &mut BusReader<Entry> {
     &mut self.receiver.bus_rx
   }
