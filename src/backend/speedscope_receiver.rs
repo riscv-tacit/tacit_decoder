@@ -8,24 +8,9 @@ use jsonschema::{JSONSchema, Draft};
 use serde_json::{json, Value};
 use serde::Serialize;
 
-use indexmap::IndexMap;
-
-use std::fs;
-use object::{Object, ObjectSymbol};
-use addr2line::Loader;
-use gcno_reader::cfg::SourceLocation;
-
-use log::{debug, warn};
+use log::debug;
 
 use crate::backend::stack_unwinder::StackUnwinder;
-
-// everything you need to know about a symbol
-pub struct SymbolInfo {
-    name: String,
-    index: u32, 
-    line: u32,
-    file: String,
-}
 
 #[derive(Serialize)]
 pub struct ProfileEntry {
