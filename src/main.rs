@@ -16,17 +16,26 @@ mod backend {
     pub mod afdo_receiver;
     pub mod gcda_receiver;
     pub mod speedscope_receiver;
+    pub mod stack_unwinder;
 }
+
 use frontend::packet::FHeader;
+
+// file IO
 use std::fs::File;
 use std::io::{Read, BufReader};
+// collections 
 use std::collections::HashMap;
+// argparse dependency
 use clap::Parser;
+// objdump dependency
 use capstone::prelude::*;
 use capstone::arch::riscv::{ArchMode, ArchExtraMode};
 use capstone::Insn;
 use object::{Object, ObjectSection};
+// bus dependency
 use bus::Bus;
+use std::thread;
 use backend::event::{Entry, Event};
 use backend::txt_receiver::TxtReceiver;
 use backend::json_receiver::JsonReceiver;
@@ -34,9 +43,12 @@ use backend::afdo_receiver::AfdoReceiver;
 use backend::abstract_receiver::AbstractReceiver;
 use backend::gcda_receiver::GcdaReceiver;
 use backend::speedscope_receiver::SpeedscopeReceiver;
-use std::thread;
+
+// error handling
 use anyhow::Result;
-use log::trace;
+// logging
+use log::{debug, trace};
+
 const BRANCH_OPCODES: &[&str] = &["beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez",
                                 "bgez", "blez", "bltz", "bgtz", "bgt", "ble", "bgtu", "bleu",
                                 "c.beqz", "c.bnez", "c.bltz", "c.bgez"];
@@ -158,7 +170,7 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
         .build()?;
 
     let decoded_instructions = cs.disasm_all(&text_data, entry_point)?;
-    trace!("found {} instructions", decoded_instructions.len());
+    debug!("[main] found {} instructions", decoded_instructions.len());
 
     // create a map of address to instruction 
     let mut insn_map : HashMap<u64, &Insn> = HashMap::new();
