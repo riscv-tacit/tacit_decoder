@@ -14,7 +14,7 @@ use gcno_reader::cfg::SourceLocation;
 use std::fs;
 use addr2line::Loader;
 
-use log::{debug, warn};
+use log::{trace, debug, warn};
 use anyhow::Result;
 
 use crate::backend::event::{Entry, Event};
@@ -82,7 +82,7 @@ impl StackUnwinder {
             .build()?;
 
         let decoded_instructions = cs.disasm_all(&text_data, entry_point)?;
-        debug!("[StackUnwinder::new] found {} instructions", decoded_instructions.len());
+        trace!("[StackUnwinder::new] found {} instructions", decoded_instructions.len());
 
         // create a map of address to instruction 
         let mut insn_map : HashMap<u64, InsnInfo> = HashMap::new();
@@ -106,7 +106,7 @@ impl StackUnwinder {
                 line: loc.lines,
                 file: String::from(loc.file),
             };
-            debug!("func_info: addr: {:#x}, name: {}, index: {}", func_addr, func_info.name, func_info.index);
+            trace!("func_info: addr: {:#x}, name: {}, index: {}", func_addr, func_info.name, func_info.index);
             // check if the func_addr is already in the map
             if func_symbol_map.contains_key(&func_addr) {
                 warn!("func_addr: {:#x} already in the map with name: {}", func_addr, func_symbol_map[&func_addr].name);
@@ -160,9 +160,13 @@ impl StackUnwinder {
         let prev_insn = self.insn_map.get(&entry.arc.0).unwrap();
         let target_frame_addr = entry.arc.1;
         let mut closed_frames = Vec::new();
+        // if we come in with an empty stack, we did not close any frames
+        if self.frame_stack.is_empty() {
+            return (false, self.frame_stack.len(), closed_frames);
+        }
+        // if we come in with an em
         if prev_insn.mnemonic == "ret" || (prev_insn.mnemonic == "c.jr" && prev_insn.op_str == "ra") {
             loop {
-                // debug!("infinite loop?");
                 // peek the top of the stack
                 if let Some(frame_idx) = self.frame_stack.last() {
                     // if this function range is within the target frame range, we can stop
@@ -172,7 +176,7 @@ impl StackUnwinder {
                     }
                     // if not, pop the stack
                     if let Some(frame_idx) = self.frame_stack.pop() {
-                        debug!("closing frame: {}", frame_idx);
+                        trace!("closing frame: {}", frame_idx);
                         let func_start_addr = self.idx_2_addr_range[&frame_idx].0;
                         closed_frames.push(self.func_symbol_map[&func_start_addr].clone());
                     } // if the stack is empty, we are done
@@ -193,9 +197,13 @@ impl StackUnwinder {
     pub fn flush(&mut self) -> Vec<SymbolInfo> {
         let mut closed_frames = Vec::new();
         while let Some(frame_idx) = self.frame_stack.pop() {
-            debug!("closing frame while flushing: {}", frame_idx);
+            trace!("closing frame while flushing: {}", frame_idx);
             closed_frames.push(self.func_symbol_map[&self.idx_2_addr_range[&frame_idx].0].clone());
         }
         closed_frames
+    }
+
+    pub fn get_symbol_info(&self, addr: u64) -> SymbolInfo {
+        self.func_symbol_map[&addr].clone()
     }
 }

@@ -15,8 +15,9 @@ mod backend {
     pub mod json_receiver;
     pub mod afdo_receiver;
     pub mod gcda_receiver;
-    pub mod speedscope_receiver;
     pub mod stack_unwinder;
+    pub mod speedscope_receiver;
+    pub mod vpp_receiver;
 }
 
 use frontend::packet::FHeader;
@@ -43,7 +44,7 @@ use backend::afdo_receiver::AfdoReceiver;
 use backend::abstract_receiver::AbstractReceiver;
 use backend::gcda_receiver::GcdaReceiver;
 use backend::speedscope_receiver::SpeedscopeReceiver;
-
+use backend::vpp_receiver::VPPReceiver;
 // error handling
 use anyhow::Result;
 // logging
@@ -88,6 +89,9 @@ struct Args {
     // output the decoded trace in speedscope format
     #[arg(long, default_value_t = false)]
     to_speedscope: bool,
+    // output the decoded trace in vpp format
+    #[arg(long, default_value_t = false)]
+    to_vpp: bool,
 }
 
 fn refund_addr(addr: u64) -> u64 {
@@ -285,6 +289,11 @@ fn main() -> Result<()> {
     if args.to_speedscope {
         let speedscope_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(SpeedscopeReceiver::new(speedscope_bus_endpoint, args.binary.clone())));
+    }
+
+    if args.to_vpp {
+        let vpp_bus_endpoint = bus.add_rx();
+        receivers.push(Box::new(VPPReceiver::new(vpp_bus_endpoint, args.binary.clone())));
     }
 
     let frontend_handle = thread::spawn(move || trace_decoder(&args, bus));

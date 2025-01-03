@@ -1,5 +1,7 @@
 use crate::backend::event::{Entry, Event};
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::backend::stack_unwinder::StackUnwinder;
+
 use bus::BusReader;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -10,7 +12,6 @@ use serde::Serialize;
 
 use log::debug;
 
-use crate::backend::stack_unwinder::StackUnwinder;
 
 #[derive(Serialize)]
 pub struct ProfileEntry {
