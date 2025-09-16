@@ -11,8 +11,8 @@ pub enum FHeader {
     FIj = 0b011,   // inferable jump
     FTrap = 0b100, // trapping happened - could be interrupt or exception
     FSync = 0b101, // a synchronization packet
-    FVal = 0b110,   // this packets report a certain value upon request
-    FRes = 0b111,   // reserved for now
+    FVal = 0b110,  // this packets report a certain value upon request
+    FRes = 0b111,  // reserved for now
 }
 
 impl From<u8> for FHeader {
@@ -34,9 +34,9 @@ impl From<u8> for FHeader {
 impl From<CHeader> for FHeader {
     fn from(c_header: CHeader) -> Self {
         match c_header {
-            CHeader::CTb  => FHeader::FTb,
-            CHeader::CNt  => FHeader::FNt,
-            CHeader::CIj  => FHeader::FIj,
+            CHeader::CTb => FHeader::FTb,
+            CHeader::CNt => FHeader::FNt,
+            CHeader::CIj => FHeader::FIj,
             CHeader::CNa => panic!("CNa should not be converted to FHeader"),
         }
     }

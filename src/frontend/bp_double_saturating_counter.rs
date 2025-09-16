@@ -54,7 +54,10 @@ pub struct BpDoubleSaturatingCounter {
 
 impl BpDoubleSaturatingCounter {
     pub fn new(num_entries: u64) -> Self {
-        Self { num_entries, counters: vec![BpState::WeakNotTaken; num_entries as usize] }
+        Self {
+            num_entries,
+            counters: vec![BpState::WeakNotTaken; num_entries as usize],
+        }
     }
 
     pub fn predict(&mut self, pc: u64, hit: bool) -> bool {
@@ -62,15 +65,20 @@ impl BpDoubleSaturatingCounter {
         let state = self.counters[index as usize];
         let prediction = state.judge();
         if hit == false {
-            if prediction == true { // predicted taken, but miss
+            if prediction == true {
+                // predicted taken, but miss
                 self.counters[index as usize] = state._decrement();
-            } else { // predicted not taken, but hit
+            } else {
+                // predicted not taken, but hit
                 self.counters[index as usize] = state._increment();
             }
-        } else { // hit
-            if prediction == true { // predicted taken, and hit
+        } else {
+            // hit
+            if prediction == true {
+                // predicted taken, and hit
                 self.counters[index as usize] = state._increment();
-            } else { // predicted not taken, and hit
+            } else {
+                // predicted not taken, and hit
                 self.counters[index as usize] = state._decrement();
             }
         }

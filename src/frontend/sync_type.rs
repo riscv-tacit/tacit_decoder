@@ -4,8 +4,8 @@ pub const SYNC_TYPE_OFFSET: u8 = 5;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SyncType {
     SyncNone = 0b000,
-    SyncStart= 0b001,
-    SyncPeriodic= 0b010,
+    SyncStart = 0b001,
+    SyncPeriodic = 0b010,
     SyncEnd = 0b100,
 }
 

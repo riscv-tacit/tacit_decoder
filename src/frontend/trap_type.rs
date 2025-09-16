@@ -3,10 +3,10 @@ pub const TRAP_TYPE_OFFSET: u8 = 5;
 
 #[derive(Debug, Copy, Clone)]
 pub enum TrapType {
-    TNone      = 0b000,
+    TNone = 0b000,
     TException = 0b001,
     TInterrupt = 0b010,
-    TReturn    = 0b100,
+    TReturn = 0b100,
 }
 
 impl From<u8> for TrapType {

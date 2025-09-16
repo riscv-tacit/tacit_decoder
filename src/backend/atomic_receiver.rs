@@ -1,5 +1,5 @@
-use crate::backend::event::{Entry, Event};
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::backend::event::{Entry, Event};
 use crate::backend::stack_unwinder::{StackUnwinder, SymbolInfo};
 use bus::BusReader;
 use std::fs::File;
@@ -11,7 +11,7 @@ pub struct AtomicReceiver {
     unwinder: StackUnwinder,
     symbol_index: std::collections::BTreeMap<u64, SymbolInfo>,
     call_stack: Vec<SymbolInfo>,
-    last_ts: u64,  // track most recent timestamp
+    last_ts: u64, // track most recent timestamp
 }
 
 impl AtomicReceiver {
@@ -23,7 +23,11 @@ impl AtomicReceiver {
         }
         AtomicReceiver {
             writer: BufWriter::new(File::create("trace.atomics.txt").unwrap()),
-            receiver: BusReceiver { name: "atomics".into(), bus_rx, checksum: 0 },
+            receiver: BusReceiver {
+                name: "atomics".into(),
+                bus_rx,
+                checksum: 0,
+            },
             unwinder,
             symbol_index,
             call_stack: Vec::new(),
@@ -34,9 +38,7 @@ impl AtomicReceiver {
     /// Is this a load-reserved, store-conditional, or atomic memory operation?
     fn is_atomic_insn(insn: &rvdasm::insn::Insn) -> bool {
         let name = insn.get_name();
-        name.starts_with("lr.")
-         || name.starts_with("sc.")
-         || name.starts_with("amo")
+        name.starts_with("lr.") || name.starts_with("sc.") || name.starts_with("amo")
     }
 }
 
@@ -84,13 +86,28 @@ impl AbstractReceiver for AtomicReceiver {
                 let ts = self.last_ts;
                 let pc = entry.arc.0;
                 // print the atomic instruction
-                writeln!(self.writer, "[{:>10}] 0x{:08x}: {}", ts, pc, insn.to_string()).unwrap();
+                writeln!(
+                    self.writer,
+                    "[{:>10}] 0x{:08x}: {}",
+                    ts,
+                    pc,
+                    insn.to_string()
+                )
+                .unwrap();
                 // print call stack
                 writeln!(self.writer, "  Call stack:").unwrap();
                 for frame in &self.call_stack {
                     // find the start address for this frame
-                    let addr = self.symbol_index.iter()
-                        .find_map(|(&a, info)| if info.index == frame.index { Some(a) } else { None })
+                    let addr = self
+                        .symbol_index
+                        .iter()
+                        .find_map(|(&a, info)| {
+                            if info.index == frame.index {
+                                Some(a)
+                            } else {
+                                None
+                            }
+                        })
                         .unwrap_or(0);
                     writeln!(self.writer, "    {} @ 0x{:x}", frame.name, addr).unwrap();
                 }

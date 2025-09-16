@@ -1,11 +1,11 @@
-use crate::backend::event::{Entry, Event};
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::backend::event::{Entry, Event};
 use crate::backend::stack_unwinder::{StackUnwinder, SymbolInfo};
 use bus::BusReader;
+use log::debug;
+use serde_json::json;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use serde_json::json;
-use log::debug;
 
 /// A Chrome Tracing (Perfetto) JSON receiver for RISC‑V trace decoding,
 /// but using the unwinder’s stack as the ground truth.
@@ -25,7 +25,11 @@ impl PerfettoReceiver {
         let unwinder = StackUnwinder::new(elf_path).unwrap();
         PerfettoReceiver {
             writer: BufWriter::new(File::create("trace.perfetto.json").unwrap()),
-            receiver: BusReceiver { name: "perfetto".into(), bus_rx, checksum: 0 },
+            receiver: BusReceiver {
+                name: "perfetto".into(),
+                bus_rx,
+                checksum: 0,
+            },
             unwinder,
             events: Vec::new(),
             start_ts: 0,
@@ -138,4 +142,3 @@ impl AbstractReceiver for PerfettoReceiver {
         self.writer.flush().unwrap();
     }
 }
-

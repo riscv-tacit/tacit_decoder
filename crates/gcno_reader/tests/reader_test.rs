@@ -1,8 +1,8 @@
 use anyhow::Result;
-use gcno_reader::reader::GCNOReader;
 use env_logger;
-use gcno_reader::gcno::str_trim;
 use gcno_reader::cfg::ControlFlowGraph;
+use gcno_reader::gcno::str_trim;
+use gcno_reader::reader::GCNOReader;
 
 #[test]
 fn test_gcno_read_sort() -> Result<()> {

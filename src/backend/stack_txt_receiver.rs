@@ -1,10 +1,10 @@
-use crate::backend::event::{Entry, Event};
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::backend::event::{Entry, Event};
 use crate::backend::stack_unwinder::{StackUnwinder, SymbolInfo};
 use bus::BusReader;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::collections::BTreeMap;
 
 pub struct StackTxtReceiver {
     writer: BufWriter<File>,
@@ -25,7 +25,11 @@ impl StackTxtReceiver {
 
         StackTxtReceiver {
             writer: BufWriter::new(File::create("trace.stack.txt").unwrap()),
-            receiver: BusReceiver { name: "stacktxt".into(), bus_rx, checksum: 0 },
+            receiver: BusReceiver {
+                name: "stacktxt".into(),
+                bus_rx,
+                checksum: 0,
+            },
             stack_unwinder,
             symbol_index,
         }
@@ -75,7 +79,12 @@ impl AbstractReceiver for StackTxtReceiver {
                     format!("0x{:x}", pc)
                 };
 
-                writeln!(self.writer, "[timestamp: {}] {:?} -> {}", ts, entry.event, sym_desc).unwrap();
+                writeln!(
+                    self.writer,
+                    "[timestamp: {}] {:?} -> {}",
+                    ts, entry.event, sym_desc
+                )
+                .unwrap();
                 self.dump_current_stack().unwrap();
             }
 
@@ -92,7 +101,12 @@ impl AbstractReceiver for StackTxtReceiver {
                     format!("0x{:x}", pc)
                 };
 
-                writeln!(self.writer, "[timestamp: {}] {:?} -> {}", ts, entry.event, sym_desc).unwrap();
+                writeln!(
+                    self.writer,
+                    "[timestamp: {}] {:?} -> {}",
+                    ts, entry.event, sym_desc
+                )
+                .unwrap();
                 self.dump_current_stack().unwrap();
             }
             _ => {}
