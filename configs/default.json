@@ -1,0 +1,17 @@
+{
+  "encoded_trace": "../baremetal-ide/build/examples/pmu-tests/tacit.out",
+  "binary": "../baremetal-ide/build/examples/pmu-tests/trace-hello.elf",
+  "header_only": false,
+  "to_stats": false,
+  "to_txt": true,
+  "to_stack_txt": false,
+  "to_atomics": false,
+  "to_afdo": false,
+  "gcno": "",
+  "to_gcda": false,
+  "to_speedscope": false,
+  "to_perfetto": false,
+  "to_vpp": false,
+  "to_foc": false,
+  "to_vbb": false
+}

@@ -11,6 +11,5 @@ target-rust-analyzer/
 
 *.dump
 *.txt
-*.json
 *.afdo
 *.log
