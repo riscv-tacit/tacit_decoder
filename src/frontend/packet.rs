@@ -133,7 +133,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
     Ok(packet)
 }
 
-pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, RuntimeCfg)> {
+pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, DecoderRuntimeCfg)> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
     trace!("first_byte: {:08b}", first_byte);
@@ -182,7 +182,7 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Runtim
 
     Ok((
         packet,
-        RuntimeCfg {
+        DecoderRuntimeCfg {
             br_mode,
             bp_entries,
             ctx_mode,
