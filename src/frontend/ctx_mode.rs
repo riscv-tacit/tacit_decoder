@@ -13,7 +13,7 @@ impl From<u64> for CtxMode {
             0b01 => CtxMode::CtxUser,  // User-space only context
             0b10 => CtxMode::CtxWatch, // watch for a specific context
             0b11 => CtxMode::CtxAll,   // all contexts
-            _ => panic!("Invalid CtxMode value"),
+            _ => panic!("Invalid CtxMode value, got: {}", value),
         }
     }
 }

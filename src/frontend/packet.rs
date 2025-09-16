@@ -166,6 +166,9 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
     packet.c_header = c_header;
     packet.f_header = f_header;
     packet.func3 = SubFunc3::SyncType(sync_type);
+    
+    packet.target_address = read_varint(stream)?;
+    packet.timestamp = read_varint(stream)?;
 
     let br_mode_raw = read_varint(stream)?;
     let br_mode = BrMode::from(br_mode_raw);
