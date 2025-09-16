@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrMode {
     BrTarget = 0b00,
     BrHistory = 0b01,
@@ -6,8 +6,8 @@ pub enum BrMode {
     BrReserved = 0b11,
 }
 
-impl From<u64> for BrMode {
-    fn from(value: u64) -> Self {
+impl From<u8> for BrMode {
+    fn from(value: u8) -> Self {
         match value {
             0b00 => BrMode::BrTarget,
             0b01 => BrMode::BrHistory,

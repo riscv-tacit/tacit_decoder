@@ -8,9 +8,12 @@ extern crate gcno_reader;
 mod frontend {
     pub mod packet;
     pub mod br_mode;
+    pub mod ctx_mode;
     pub mod c_header;
     pub mod f_header;
     pub mod trap_type;
+    pub mod sync_type;
+    pub mod runtime_cfg;
     pub mod bp_double_saturating_counter;
 }
 mod backend {
@@ -255,7 +258,11 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
             pc = step_bb_until(pc, &insn_map, refund_addr(packet.from_address), &mut bus);
             pc = refund_addr(packet.target_address ^ (pc >> 1));
             timestamp += packet.timestamp;
-            bus.broadcast(Entry::new_timed_trap(packet.trap_type, timestamp, refund_addr(packet.from_address), pc));
+            if let frontend::packet::SubFunc3::TrapType(trap_type) = packet.func3 {
+                bus.broadcast(Entry::new_timed_trap(trap_type, timestamp, refund_addr(packet.from_address), pc));
+            } else {
+                panic!("Invalid SubFunc3 for FTrap packet: {:?}", packet.func3);
+            }
         } else if mode_is_predict && packet.f_header == FHeader::FTb { // predicted hit
             bus.broadcast(Entry::new_timed_event(Event::BPHit, packet.timestamp, pc, pc));
             // predict for timestamp times
