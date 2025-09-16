@@ -47,6 +47,8 @@ use object::elf::SHF_EXECINSTR;
 use object::{Object, ObjectSection};
 use rvdasm::disassembler::*;
 use rvdasm::insn::*;
+// path dependency
+use std::path::Path;
 // bus dependency
 use bus::Bus;
 use std::thread;
@@ -531,6 +533,16 @@ fn main() -> Result<()> {
     let to_foc = pick_arg(args.to_foc, file_cfg.to_foc);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
     let static_cfg = DecoderStaticCfg { encoded_trace, binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
+
+    // verify the binary exists and is a file
+    if !Path::new(&static_cfg.binary).exists() || !Path::new(&static_cfg.binary).is_file() {
+        return Err(anyhow::anyhow!("Binary file is not valid: {}", static_cfg.binary));
+    }
+
+    // verify the encoded trace exists and is a file
+    if !Path::new(&static_cfg.encoded_trace).exists() || !Path::new(&static_cfg.encoded_trace).is_file() {
+        return Err(anyhow::anyhow!("Encoded trace file is not valid: {}", static_cfg.encoded_trace));
+    }
 
     if let Some(path) = &args.dump_effective_config {
         let mut f = std::fs::File::create(path)?;

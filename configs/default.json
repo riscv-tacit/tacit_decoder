@@ -1,6 +1,6 @@
 {
-  "encoded_trace": "../baremetal-ide/build/examples/pmu-tests/tacit.out",
-  "binary": "../baremetal-ide/build/examples/pmu-tests/trace-hello.elf",
+  "encoded_trace": "../firemarshal/tacit.out",
+  "binary": "../firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/trace-hello",
   "header_only": false,
   "to_stats": false,
   "to_txt": true,

@@ -13,7 +13,7 @@ impl From<u64> for BrMode {
             0b01 => BrMode::BrHistory,
             0b10 => BrMode::BrPredict,
             0b11 => BrMode::BrReserved,
-            _ => panic!("Invalid BrMode value"),
+            _ => panic!("Invalid BrMode value, got: {}", value),
         }
     }
 }
