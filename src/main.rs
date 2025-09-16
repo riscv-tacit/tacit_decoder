@@ -53,7 +53,7 @@ use std::thread;
 // frontend dependency
 use frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use frontend::br_mode::BrMode;
-use frontend::runtime_cfg::RuntimeCfg;
+use frontend::runtime_cfg::DecoderRuntimeCfg;
 // backend dependency
 use backend::abstract_receiver::AbstractReceiver;
 use backend::afdo_receiver::AfdoReceiver;
@@ -72,6 +72,7 @@ use backend::vpp_receiver::VPPReceiver;
 use anyhow::Result;
 // logging
 use log::{debug, trace};
+use serde::{Deserialize, Serialize};
 
 const BRANCH_OPCODES: &[&str] = &[
     "beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez", "bgez", "blez", "bltz", "bgtz",
@@ -88,54 +89,84 @@ const BUS_SIZE: usize = 1024;
     about = "Decode trace files"
 )]
 struct Args {
+    // optional JSON config file to control receivers
+    #[arg(long)]
+    config: Option<String>,
     // path to the encoded trace file
     #[arg(short, long)]
-    encoded_trace: String,
+    encoded_trace: Option<String>,
     // path to the binary file
     #[arg(short, long)]
-    binary: String,
-    // path to the decoded trace file
-    #[arg(short, long, default_value_t = String::from("trace.dump"))]
-    decoded_trace: String,
+    binary: Option<String>,
+    // optionally write the final receiver config to JSON
+    #[arg(long)]
+    dump_effective_config: Option<String>,
     // print the header configuration and exit
-    #[arg(short, long, default_value_t = false)]
-    header_only: bool,
+    #[arg(long)]
+    header_only: Option<bool>,
     // output the decoded trace in stats format
-    #[arg(long, default_value_t = false)]
-    to_stats: bool,
+    #[arg(long)]
+    to_stats: Option<bool>,
     // output the decoded trace in text format
-    #[arg(long, default_value_t = true)]
-    to_txt: bool,
+    #[arg(long)]
+    to_txt: Option<bool>,
     // output the tracked callstack in text format
-    #[arg(long, default_value_t = false)]
-    to_stack_txt: bool,
+    #[arg(long)]
+    to_stack_txt: Option<bool>,
     // output a trace of atomic operations in text format
-    #[arg(long, default_value_t = false)]
-    to_atomics: bool,
+    #[arg(long)]
+    to_atomics: Option<bool>,
     // output the decoded trace in afdo format
-    #[arg(long, default_value_t = false)]
-    to_afdo: bool,
+    #[arg(long)]
+    to_afdo: Option<bool>,
     // path to the gcno file, must be provided if to_afdo is true
-    #[arg(long, default_value_t = String::from(""))]
-    gcno: String,
+    #[arg(long)]
+    gcno: Option<String>,
     // output the decoded trace in gcda format
-    #[arg(long, default_value_t = false)]
-    to_gcda: bool,
+    #[arg(long)]
+    to_gcda: Option<bool>,
     // output the decoded trace in speedscope format
-    #[arg(long, default_value_t = false)]
-    to_speedscope: bool,
+    #[arg(long)]
+    to_speedscope: Option<bool>,
     // output the decoded trace in perfetto format
-    #[arg(long, default_value_t = false)]
-    to_perfetto: bool,
+    #[arg(long)]
+    to_perfetto: Option<bool>,
     // output the decoded trace in vpp format
-    #[arg(long, default_value_t = false)]
-    to_vpp: bool,
+    #[arg(long)]
+    to_vpp: Option<bool>,
     // output the decoded trace in foc format
-    #[arg(long, default_value_t = false)]
-    to_foc: bool,
+    #[arg(long)]
+    to_foc: Option<bool>,
     // output the decoded trace in vbb format
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
+    to_vbb: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct DecoderStaticCfg {
+    encoded_trace: String,
+    binary: String,
+    header_only: bool,
+    to_stats: bool,
+    to_txt: bool,
+    to_stack_txt: bool,
+    to_atomics: bool,
+    to_afdo: bool,
+    gcno: String,
+    to_gcda: bool,
+    to_speedscope: bool,
+    to_perfetto: bool,
+    to_vpp: bool,
+    to_foc: bool,
     to_vbb: bool,
+}
+
+fn load_file_config(path: &str) -> Result<DecoderStaticCfg> {
+    let f = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(f);
+    let cfg: DecoderStaticCfg = serde_json::from_reader(reader)?;
+    Ok(cfg)
 }
 
 fn refund_addr(addr: u64) -> u64 {
@@ -195,8 +226,8 @@ fn step_bb_until(
 }
 
 // frontend decoding packets and pushing entries to the bus
-fn trace_decoder(args: Args, runtime_cfg: RuntimeCfg, mut bus: Bus<Entry>) -> Result<()> {
-    let mut elf_file = File::open(args.binary.clone())?;
+fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, mut bus: Bus<Entry>) -> Result<()> {
+    let mut elf_file = File::open(static_cfg.binary.clone())?;
     let mut elf_buffer = Vec::new();
     elf_file.read_to_end(&mut elf_buffer)?;
     let elf = object::File::parse(&*elf_buffer)?;
@@ -236,7 +267,7 @@ fn trace_decoder(args: Args, runtime_cfg: RuntimeCfg, mut bus: Bus<Entry>) -> Re
     }
     debug!("[main] found {} instructions", insn_map.len());
 
-    let encoded_trace_file = File::open(args.encoded_trace.clone())?;
+    let encoded_trace_file = File::open(static_cfg.encoded_trace.clone())?;
     let mut encoded_trace_reader: BufReader<File> = BufReader::new(encoded_trace_file);
 
     let (packet, header_cfg) = frontend::packet::read_first_packet(&mut encoded_trace_reader)?;
@@ -246,7 +277,7 @@ fn trace_decoder(args: Args, runtime_cfg: RuntimeCfg, mut bus: Bus<Entry>) -> Re
         ));
     }
 
-    if args.header_only {
+    if static_cfg.header_only {
         println!("Printing header configuration: {:?}", header_cfg);
         std::process::exit(0);
     }
@@ -471,19 +502,54 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
+    // If a config file is supplied, use it for receiver toggles (CLI still supplies paths).
+    let file_cfg= if let Some(path) = &args.config {
+        load_file_config(path)?
+    } else {
+        DecoderStaticCfg::default()
+    };
+
+
+    fn pick_arg<T: Clone>(cli: Option<T>, file: T) -> T {
+        cli.unwrap_or(file)
+    }
+
+    // Resolve toggles: config file takes precedence if provided; otherwise use CLI flags
+    let encoded_trace = pick_arg(args.encoded_trace, file_cfg.encoded_trace);
+    let binary = pick_arg(args.binary, file_cfg.binary);
+    let header_only = pick_arg(args.header_only, file_cfg.header_only);
+    let to_stats = pick_arg(args.to_stats, file_cfg.to_stats);
+    let to_txt = pick_arg(args.to_txt, file_cfg.to_txt);
+    let to_stack_txt = pick_arg(args.to_stack_txt, file_cfg.to_stack_txt);
+    let to_atomics = pick_arg(args.to_atomics, file_cfg.to_atomics);
+    let to_afdo = pick_arg(args.to_afdo, file_cfg.to_afdo);
+    let gcno_path = pick_arg(args.gcno, file_cfg.gcno);
+    let to_gcda = pick_arg(args.to_gcda, file_cfg.to_gcda);
+    let to_speedscope = pick_arg(args.to_speedscope, file_cfg.to_speedscope);
+    let to_perfetto = pick_arg(args.to_perfetto, file_cfg.to_perfetto);
+    let to_vpp = pick_arg(args.to_vpp, file_cfg.to_vpp);
+    let to_foc = pick_arg(args.to_foc, file_cfg.to_foc);
+    let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
+    let static_cfg = DecoderStaticCfg { encoded_trace, binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
+
+    if let Some(path) = &args.dump_effective_config {
+        let mut f = std::fs::File::create(path)?;
+        serde_json::to_writer_pretty(&mut f, &static_cfg)?;
+    }
+
     let runtime_cfg = {
-        let trace_file = File::open(args.encoded_trace.clone())?;
+        let trace_file = File::open(static_cfg.encoded_trace.clone())?;
         let mut trace_reader = BufReader::new(trace_file);
-        let (_, cfg) = frontend::packet::read_first_packet(&mut trace_reader)?;
-        cfg
+        let (_, runtime_cfg) = frontend::packet::read_first_packet(&mut trace_reader)?;
+        runtime_cfg
     };
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
 
     // add a receiver to the bus for stats output
-    if args.to_stats {
-        let encoded_trace_file = File::open(args.encoded_trace.clone())?;
+    if to_stats {
+        let encoded_trace_file = File::open(static_cfg.encoded_trace.clone())?;
         // get the file size
         let file_size = encoded_trace_file.metadata()?.len();
         // close the file
@@ -497,24 +563,24 @@ fn main() -> Result<()> {
     }
 
     // add a receiver to the bus for txt output
-    if args.to_txt {
+    if to_txt {
         let txt_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(TxtReceiver::new(txt_bus_endpoint)));
     }
 
-    if args.to_stack_txt {
-        let stack_txt_rx = StackTxtReceiver::new(bus.add_rx(), args.binary.clone());
+    if to_stack_txt {
+        let stack_txt_rx = StackTxtReceiver::new(bus.add_rx(), static_cfg.binary.clone());
         receivers.push(Box::new(stack_txt_rx));
     }
 
-    if args.to_atomics {
-        let atomic_rx = AtomicReceiver::new(bus.add_rx(), args.binary.clone());
+    if to_atomics {
+        let atomic_rx = AtomicReceiver::new(bus.add_rx(), static_cfg.binary.clone());
         receivers.push(Box::new(atomic_rx));
     }
 
-    if args.to_afdo {
+    if to_afdo {
         let afdo_bus_endpoint = bus.add_rx();
-        let mut elf_file = File::open(args.binary.clone())?;
+        let mut elf_file = File::open(static_cfg.binary.clone())?;
         let mut elf_buffer = Vec::new();
         elf_file.read_to_end(&mut elf_buffer)?;
         let elf = object::File::parse(&*elf_buffer)?;
@@ -525,57 +591,55 @@ fn main() -> Result<()> {
         drop(elf_file);
     }
 
-    if args.to_gcda {
+    if to_gcda {
         let gcda_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(GcdaReceiver::new(
             gcda_bus_endpoint,
-            args.gcno.clone(),
-            args.binary.clone(),
+            gcno_path.clone(),
+            static_cfg.binary.clone(),
         )));
     }
 
-    if args.to_speedscope {
+    if to_speedscope {
         let speedscope_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(SpeedscopeReceiver::new(
             speedscope_bus_endpoint,
-            args.binary.clone(),
+            static_cfg.binary.clone(),
         )));
     }
 
-    if args.to_perfetto {
+    if to_perfetto {
         let perfetto_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(PerfettoReceiver::new(
             perfetto_bus_endpoint,
-            args.binary.clone(),
+            static_cfg.binary.clone(),
         )));
     }
 
-    if args.to_vpp {
+    if to_vpp {
         let vpp_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(VPPReceiver::new(
             vpp_bus_endpoint,
-            args.binary.clone(),
+            static_cfg.binary.clone(),
             runtime_cfg.br_mode == BrMode::BrTarget,
         )));
     }
 
-    if args.to_foc {
+    if to_foc {
         let foc_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(FOCReceiver::new(
             foc_bus_endpoint,
-            args.binary.clone(),
+            static_cfg.binary.clone(),
         )));
     }
 
-    if args.to_vbb {
+    if to_vbb {
         let vbb_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(VBBReceiver::new(vbb_bus_endpoint)));
     }
 
-    let args_for_frontend = args.clone();
-    let runtime_cfg_for_frontend = runtime_cfg.clone();
     let frontend_handle =
-        thread::spawn(move || trace_decoder(args_for_frontend, runtime_cfg_for_frontend, bus));
+        thread::spawn(move || trace_decoder(static_cfg.clone(), runtime_cfg.clone(), bus));
     let receiver_handles: Vec<_> = receivers
         .into_iter()
         .map(|mut receiver| thread::spawn(move || receiver.try_receive_loop()))
