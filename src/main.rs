@@ -44,7 +44,7 @@ use std::collections::HashMap;
 use clap::Parser;
 // objdump dependency
 use object::elf::SHF_EXECINSTR;
-use object::{Object, ObjectSection, ObjectSymbol, SectionFlags};
+use object::{Object, ObjectSection};
 use rvdasm::disassembler::*;
 use rvdasm::insn::*;
 // bus dependency
@@ -97,9 +97,9 @@ struct Args {
     // path to the decoded trace file
     #[arg(short, long, default_value_t = String::from("trace.dump"))]
     decoded_trace: String,
-    // print the timestamp in the decoded trace file
+    // print the header configuration and exit
     #[arg(short, long, default_value_t = false)]
-    timestamp: bool,
+    header_only: bool,
     // output the decoded trace in stats format
     #[arg(long, default_value_t = false)]
     to_stats: bool,
@@ -244,6 +244,11 @@ fn trace_decoder(args: Args, runtime_cfg: RuntimeCfg, mut bus: Bus<Entry>) -> Re
         return Err(anyhow::anyhow!(
             "runtime configuration mismatch between CLI pre-read and trace header"
         ));
+    }
+
+    if args.header_only {
+        println!("Printing header configuration: {:?}", header_cfg);
+        std::process::exit(0);
     }
 
     let mut bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);

@@ -861,25 +861,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30bde2b3dc3671ae49d8e2e9f044c7c005836e7a023ee57cffa25ab82764bb9e"
 
 [[package]]
-name = "ltrace-decoder"
-version = "0.1.0"
-dependencies = [
- "addr2line",
- "anyhow",
- "bus",
- "clap",
- "env_logger 0.10.2",
- "gcno_reader",
- "indexmap",
- "jsonschema",
- "log",
- "object",
- "rvdasm",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1356,6 +1337,25 @@ checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "tacit-decoder"
+version = "0.1.0"
+dependencies = [
+ "addr2line",
+ "anyhow",
+ "bus",
+ "clap",
+ "env_logger 0.10.2",
+ "gcno_reader",
+ "indexmap",
+ "jsonschema",
+ "log",
+ "object",
+ "rvdasm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
