@@ -1,6 +1,6 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, Event};
-use crate::backend::stack_unwinder::{StackUnwinder, SymbolInfo};
+use crate::backend::stack_unwinder::StackUnwinder;
 use bus::BusReader;
 use log::debug;
 use serde_json::json;

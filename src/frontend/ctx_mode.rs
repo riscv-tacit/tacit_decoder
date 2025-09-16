@@ -6,8 +6,8 @@ pub enum CtxMode {
     CtxAll = 0b11,
 }
 
-impl From<u8> for CtxMode {
-    fn from(value: u8) -> Self {
+impl From<u64> for CtxMode {
+    fn from(value: u64) -> Self {
         match value {
             0b00 => CtxMode::CtxBare,  // baremetal, no context
             0b01 => CtxMode::CtxUser,  // User-space only context

@@ -15,7 +15,7 @@ use crate::frontend::trap_type::*;
 pub enum SubFunc3 {
     None,
     TrapType(TrapType),
-    SyncType(SyncType),
+    SyncType(SyncType), // unused for now
 }
 
 #[derive(Debug)]
@@ -26,7 +26,7 @@ pub struct Packet {
     pub func3: SubFunc3,
     pub target_address: u64,
     pub from_address: u64,
-    pub ctx: u64,
+    pub _ctx: u64, // unused for now
     pub timestamp: u64,
 }
 
@@ -40,7 +40,7 @@ impl Packet {
             func3: SubFunc3::None,
             target_address: 0,
             from_address: 0,
-            ctx: 0,
+            _ctx: 0,
             timestamp: 0,
         }
     }
@@ -167,12 +167,12 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Runtim
     packet.f_header = f_header;
     packet.func3 = SubFunc3::SyncType(sync_type);
 
-    let br_mode_raw = read_u8(stream)?;
+    let br_mode_raw = read_varint(stream)?;
     let br_mode = BrMode::from(br_mode_raw);
 
     let bp_entries = read_varint(stream)?;
 
-    let ctx_mode_raw = read_u8(stream)?;
+    let ctx_mode_raw = read_varint(stream)?;
     let ctx_mode = CtxMode::from(ctx_mode_raw);
 
     let ctx_id = read_varint(stream)?;
