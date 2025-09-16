@@ -8,14 +8,20 @@ Comparing to other trace formats that focus on compression efficiency, it tries 
 This includes precise timing of taken and non-taken branches, inferable and uninferable jumps.  
 TACIT provides rich timing information to profilers while trying to be simple and efficient in encoding.
 
-## Running TACIT Decoder
+### JSON configuration
+
+We now support specifying a config via json. This simplifies the work as the CLI arguments has grown significantly over time.
 
 ```bash
-cargo run -- --binary [binary] --encoded-trace [/path/to/trace] [optional arguments]
+cargo run --bin tacit-decoder --  --config configs/default.json
 ```
 
-### Optional Arguments
+### CLI Arguments
 
+CLI arguments may be used to overwrite the configuration specified by a json file, useful for quick iteration.
+
+* `--dump-effective-config` - dump the static configuration after merging file and CLI. Useful for argument debugging.  
+* `--header-only` - read the header packet, dump the trace runtime configuration, and exit.
 * `--to-txt` - attach an analysis endpoint to dump all trace events and instructions decoded to a text file for reading
 * `--to-stack-txt` - attach an analysis endpoint to dump decoded stack trace traversal to a text file for reading
 * `--to-atomics` - attach an analysis endpoint to dump a trace of atomic operators and their stack frames to a text file for reading
