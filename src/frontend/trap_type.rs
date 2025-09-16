@@ -1,7 +1,7 @@
 pub const TRAP_TYPE_MASK: u8 = 0b1110_0000;
 pub const TRAP_TYPE_OFFSET: u8 = 5;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum TrapType {
     TNone      = 0b000,
     TException = 0b001,

@@ -6,13 +6,24 @@ use log::trace;
 use crate::frontend::c_header::*;
 use crate::frontend::f_header::*;
 use crate::frontend::trap_type::*;
+use crate::frontend::sync_type::*;
+use crate::frontend::br_mode::*;
+use crate::frontend::ctx_mode::*;
+use crate::frontend::runtime_cfg::*;
+
+#[derive(Debug, Copy, Clone)]
+pub enum SubFunc3 {
+    None,
+    TrapType(TrapType),
+    SyncType(SyncType),
+}
 
 #[derive(Debug)]
 pub struct Packet {
     pub is_compressed: bool,
     pub c_header: CHeader,
     pub f_header: FHeader,
-    pub trap_type: TrapType,
+    pub func3: SubFunc3,
     pub target_address: u64,
     pub from_address: u64,
     pub ctx: u64,
@@ -26,7 +37,7 @@ impl Packet {
             is_compressed: false,
             c_header: CHeader::CNa,
             f_header: FHeader::FRes,
-            trap_type: TrapType::TNone,
+            func3: SubFunc3::None,
             target_address: 0,
             from_address: 0,
             ctx: 0,
@@ -86,6 +97,9 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FSync => {
+                    let sync_type = SyncType::from((first_byte & SYNC_TYPE_MASK) >> SYNC_TYPE_OFFSET);
+                    assert!(sync_type != SyncType::SyncStart, "SyncStart should not be observed other than in read_first_packet");
+                    packet.func3 = SubFunc3::SyncType(sync_type);
                     packet.target_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
@@ -93,7 +107,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                 }
                 FHeader::FTrap => {
                     let trap_type = TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
-                    packet.trap_type = trap_type;
+                    packet.func3 = SubFunc3::TrapType(trap_type);
                     packet.from_address = read_varint(stream)?;
                     packet.target_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
@@ -109,10 +123,14 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
     Ok(packet)
 }
 
-pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<Packet> {
+pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, RuntimeCfg)> {
     // call read_packet
     let packet = read_packet(stream)?;
     assert!(packet.f_header == FHeader::FSync);
     assert!(packet.c_header == CHeader::CNa);
-    Ok(packet)
+    let br_mode = BrMode::from(read_u8(stream)?);
+    let bp_entries = read_varint(stream)?;
+    let ctx_mode = CtxMode::from(read_u8(stream)?);
+    let ctx_id = read_varint(stream)?;
+    Ok((packet, RuntimeCfg { br_mode, bp_entries, ctx_mode, ctx_id }))
 }
