@@ -1,4 +1,4 @@
-use addr2line::{Loader};
+use addr2line::Loader;
 use std::env;
 
 fn main() {
@@ -13,7 +13,10 @@ fn main() {
     let addr = u64::from_str_radix(&args[1].trim_start_matches("0x"), 16)
         .expect("Invalid hexadecimal address");
 
-    let loader = Loader::new("/scratch/iansseijelly/ltrace_decoder/crates/gcno_reader/tests/data/x86-gcc13/sort.bin").unwrap();
+    let loader = Loader::new(
+        "/scratch/iansseijelly/ltrace_decoder/crates/gcno_reader/tests/data/x86-gcc13/sort.bin",
+    )
+    .unwrap();
     let symbol: Option<addr2line::Location> = loader.find_location(addr).unwrap();
     if let Some(loc) = symbol {
         if let Some(file) = loc.file {

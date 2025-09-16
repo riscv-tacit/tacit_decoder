@@ -10,7 +10,7 @@ fn main() {
     }
 
     let binary_path = &args[1];
-    
+
     // Read the binary file
     let binary_data = match fs::read(binary_path) {
         Ok(data) => data,
@@ -32,7 +32,8 @@ fn main() {
     // Iterate through symbols and print function addresses
     for symbol in obj_file.symbols() {
         if symbol.kind() == object::SymbolKind::Text {
-            println!("{:#x}: {}", 
+            println!(
+                "{:#x}: {}",
                 symbol.address(),
                 symbol.name().unwrap_or("<unknown>")
             );

@@ -1,86 +1,92 @@
-extern crate clap;
-extern crate object;
-extern crate rvdasm;
 extern crate bus;
-extern crate log;
+extern crate clap;
 extern crate env_logger;
 extern crate gcno_reader;
+extern crate log;
+extern crate object;
+extern crate rvdasm;
 mod frontend {
-    pub mod packet;
-    pub mod br_mode;
-    pub mod ctx_mode;
-    pub mod c_header;
-    pub mod f_header;
-    pub mod trap_type;
-    pub mod sync_type;
-    pub mod runtime_cfg;
     pub mod bp_double_saturating_counter;
+    pub mod br_mode;
+    pub mod c_header;
+    pub mod ctx_mode;
+    pub mod f_header;
+    pub mod packet;
+    pub mod runtime_cfg;
+    pub mod sync_type;
+    pub mod trap_type;
 }
 mod backend {
     pub mod abstract_receiver;
+    pub mod afdo_receiver;
+    pub mod atomic_receiver;
     pub mod event;
+    pub mod foc_receiver;
+    pub mod gcda_receiver;
+    pub mod perfetto_receiver;
+    pub mod speedscope_receiver;
+    pub mod stack_txt_receiver;
+    pub mod stack_unwinder;
     pub mod stats_receiver;
     pub mod txt_receiver;
-    pub mod stack_txt_receiver;
-    pub mod atomic_receiver;
-    pub mod afdo_receiver;
-    pub mod gcda_receiver;
-    pub mod stack_unwinder;
-    pub mod speedscope_receiver;
-    pub mod perfetto_receiver;
-    pub mod vpp_receiver;
-    pub mod foc_receiver;
     pub mod vbb_receiver;
+    pub mod vpp_receiver;
 }
 
 use frontend::f_header::FHeader;
 
 // file IO
 use std::fs::File;
-use std::io::{Read, BufReader};
-// collections 
+use std::io::{BufReader, Read};
+// collections
 use std::collections::HashMap;
 // argparse dependency
 use clap::Parser;
 // objdump dependency
+use object::elf::SHF_EXECINSTR;
+use object::{Object, ObjectSection, ObjectSymbol, SectionFlags};
 use rvdasm::disassembler::*;
 use rvdasm::insn::*;
-use object::{Object, ObjectSection, ObjectSymbol, SectionFlags};
-use object::elf::SHF_EXECINSTR;
 // bus dependency
 use bus::Bus;
 use std::thread;
 // frontend dependency
 use frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use frontend::br_mode::BrMode;
+use frontend::runtime_cfg::RuntimeCfg;
 // backend dependency
+use backend::abstract_receiver::AbstractReceiver;
+use backend::afdo_receiver::AfdoReceiver;
+use backend::atomic_receiver::AtomicReceiver;
 use backend::event::{Entry, Event};
+use backend::foc_receiver::FOCReceiver;
+use backend::gcda_receiver::GcdaReceiver;
+use backend::perfetto_receiver::PerfettoReceiver;
+use backend::speedscope_receiver::SpeedscopeReceiver;
+use backend::stack_txt_receiver::StackTxtReceiver;
 use backend::stats_receiver::StatsReceiver;
 use backend::txt_receiver::TxtReceiver;
-use backend::stack_txt_receiver::StackTxtReceiver;
-use backend::atomic_receiver::AtomicReceiver;
-use backend::afdo_receiver::AfdoReceiver;
-use backend::abstract_receiver::AbstractReceiver;
-use backend::gcda_receiver::GcdaReceiver;
-use backend::speedscope_receiver::SpeedscopeReceiver;
-use backend::perfetto_receiver::PerfettoReceiver;
-use backend::vpp_receiver::VPPReceiver;
-use backend::foc_receiver::FOCReceiver;
 use backend::vbb_receiver::VBBReceiver;
+use backend::vpp_receiver::VPPReceiver;
 // error handling
 use anyhow::Result;
 // logging
 use log::{debug, trace};
 
-const BRANCH_OPCODES: &[&str] = &["beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez",
-                                "bgez", "blez", "bltz", "bgtz", "bgt", "ble", "bgtu", "bleu",
-                                "c.beqz", "c.bnez", "c.bltz", "c.bgez"];
+const BRANCH_OPCODES: &[&str] = &[
+    "beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez", "bgez", "blez", "bltz", "bgtz",
+    "bgt", "ble", "bgtu", "bleu", "c.beqz", "c.bnez", "c.bltz", "c.bgez",
+];
 const IJ_OPCODES: &[&str] = &["jal", "j", "call", "tail", "c.j", "c.jal"];
 const UJ_OPCODES: &[&str] = &["jalr", "jr", "c.jr", "c.jalr", "ret"];
 const BUS_SIZE: usize = 1024;
 
 #[derive(Clone, Parser)]
-#[command(name = "trace-decoder", version = "0.1.0", about = "Decode trace files")]
+#[command(
+    name = "trace-decoder",
+    version = "0.1.0",
+    about = "Decode trace files"
+)]
 struct Args {
     // path to the encoded trace file
     #[arg(short, long)]
@@ -91,12 +97,6 @@ struct Args {
     // path to the decoded trace file
     #[arg(short, long, default_value_t = String::from("trace.dump"))]
     decoded_trace: String,
-    // branch mode
-    #[arg(long, default_value_t = 0)]
-    br_mode: u64,
-    // branch prediction number of entries
-    #[arg(long, default_value_t = 1024)]
-    bp_entries: u64,
     // print the timestamp in the decoded trace file
     #[arg(short, long, default_value_t = false)]
     timestamp: bool,
@@ -109,7 +109,7 @@ struct Args {
     // output the tracked callstack in text format
     #[arg(long, default_value_t = false)]
     to_stack_txt: bool,
-    // output a trace of atomic operations in text format 
+    // output a trace of atomic operations in text format
     #[arg(long, default_value_t = false)]
     to_atomics: bool,
     // output the decoded trace in afdo format
@@ -160,7 +160,8 @@ fn step_bb(pc: u64, insn_map: &HashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode
             if insn.is_branch() || insn.is_indirect_jump() {
                 break;
             } else if insn.is_direct_jump() {
-                let new_pc = (pc as i64 + insn.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
+                let new_pc =
+                    (pc as i64 + insn.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
                 pc = new_pc;
             } else {
                 pc += insn.len as u64;
@@ -170,7 +171,12 @@ fn step_bb(pc: u64, insn_map: &HashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode
     pc
 }
 
-fn step_bb_until(pc: u64, insn_map: &HashMap<u64, Insn>, target_pc: u64, bus: &mut Bus<Entry>) -> u64 {
+fn step_bb_until(
+    pc: u64,
+    insn_map: &HashMap<u64, Insn>,
+    target_pc: u64,
+    bus: &mut Bus<Entry>,
+) -> u64 {
     // println!("stepping bb from pc: {:x} until pc: {:x}", pc, target_pc);
     let mut pc = pc;
 
@@ -189,13 +195,12 @@ fn step_bb_until(pc: u64, insn_map: &HashMap<u64, Insn>, target_pc: u64, bus: &m
 }
 
 // frontend decoding packets and pushing entries to the bus
-fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
+fn trace_decoder(args: Args, runtime_cfg: RuntimeCfg, mut bus: Bus<Entry>) -> Result<()> {
     let mut elf_file = File::open(args.binary.clone())?;
     let mut elf_buffer = Vec::new();
     elf_file.read_to_end(&mut elf_buffer)?;
     let elf = object::File::parse(&*elf_buffer)?;
     let elf_arch = elf.architecture();
-
 
     let xlen = if elf_arch == object::Architecture::Riscv64 {
         Xlen::XLEN64
@@ -225,25 +230,38 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
         }
     }
     if insn_map.is_empty() {
-        return Err(anyhow::anyhow!("No executable instructions found in ELF file"));
+        return Err(anyhow::anyhow!(
+            "No executable instructions found in ELF file"
+        ));
     }
     debug!("[main] found {} instructions", insn_map.len());
 
     let encoded_trace_file = File::open(args.encoded_trace.clone())?;
-    let mut encoded_trace_reader : BufReader<File> = BufReader::new(encoded_trace_file);
+    let mut encoded_trace_reader: BufReader<File> = BufReader::new(encoded_trace_file);
 
-    let mut bp_counter = BpDoubleSaturatingCounter::new(args.bp_entries);
+    let (packet, header_cfg) = frontend::packet::read_first_packet(&mut encoded_trace_reader)?;
+    if header_cfg != runtime_cfg {
+        return Err(anyhow::anyhow!(
+            "runtime configuration mismatch between CLI pre-read and trace header"
+        ));
+    }
 
-    let br_mode = BrMode::from(args.br_mode);
+    let mut bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
+
+    let br_mode = runtime_cfg.br_mode;
     let mode_is_predict = br_mode == BrMode::BrPredict || br_mode == BrMode::BrHistory;
 
-    let packet = frontend::packet::read_first_packet(&mut encoded_trace_reader)?;
     let mut packet_count = 0;
 
     trace!("packet: {:?}", packet);
     let mut pc = refund_addr(packet.target_address);
     let mut timestamp = packet.timestamp;
-    bus.broadcast(Entry::new_timed_event(Event::Start, packet.timestamp, pc, 0));
+    bus.broadcast(Entry::new_timed_event(
+        Event::Start,
+        packet.timestamp,
+        pc,
+        0,
+    ));
 
     while let Ok(packet) = frontend::packet::read_packet(&mut encoded_trace_reader) {
         packet_count += 1;
@@ -259,51 +277,94 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
             pc = refund_addr(packet.target_address ^ (pc >> 1));
             timestamp += packet.timestamp;
             if let frontend::packet::SubFunc3::TrapType(trap_type) = packet.func3 {
-                bus.broadcast(Entry::new_timed_trap(trap_type, timestamp, refund_addr(packet.from_address), pc));
+                bus.broadcast(Entry::new_timed_trap(
+                    trap_type,
+                    timestamp,
+                    refund_addr(packet.from_address),
+                    pc,
+                ));
             } else {
                 panic!("Invalid SubFunc3 for FTrap packet: {:?}", packet.func3);
             }
-        } else if mode_is_predict && packet.f_header == FHeader::FTb { // predicted hit
-            bus.broadcast(Entry::new_timed_event(Event::BPHit, packet.timestamp, pc, pc));
+        } else if mode_is_predict && packet.f_header == FHeader::FTb {
+            // predicted hit
+            bus.broadcast(Entry::new_timed_event(
+                Event::BPHit,
+                packet.timestamp,
+                pc,
+                pc,
+            ));
             // predict for timestamp times
             for _ in 0..packet.timestamp {
                 pc = step_bb(pc, &insn_map, &mut bus, &br_mode);
                 let insn_to_resolve = insn_map.get(&pc).unwrap();
                 if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                     bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                    panic!("pc: {:x}, timestamp: {}, insn: {:?}", pc, timestamp, insn_to_resolve);
-                 }
+                    panic!(
+                        "pc: {:x}, timestamp: {}, insn: {:?}",
+                        pc, timestamp, insn_to_resolve
+                    );
+                }
                 let taken = bp_counter.predict(pc, true);
                 if taken {
-                    let new_pc = (pc as i64 + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
-                    bus.broadcast(Entry::new_timed_event(Event::TakenBranch, timestamp, pc, new_pc));
+                    let new_pc = (pc as i64
+                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                        as u64;
+                    bus.broadcast(Entry::new_timed_event(
+                        Event::TakenBranch,
+                        timestamp,
+                        pc,
+                        new_pc,
+                    ));
                     pc = new_pc;
                 } else {
                     let new_pc = pc + insn_to_resolve.len as u64;
-                    bus.broadcast(Entry::new_timed_event(Event::NonTakenBranch, timestamp, pc, new_pc));
+                    bus.broadcast(Entry::new_timed_event(
+                        Event::NonTakenBranch,
+                        timestamp,
+                        pc,
+                        new_pc,
+                    ));
                     pc = new_pc;
                 }
             }
-        } else if mode_is_predict && packet.f_header == FHeader::FNt { // predicted miss
+        } else if mode_is_predict && packet.f_header == FHeader::FNt {
+            // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::new_timed_event(Event::BPMiss, timestamp, pc, pc));
             pc = step_bb(pc, &insn_map, &mut bus, &br_mode);
             let insn_to_resolve = insn_map.get(&pc).unwrap();
             if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                 bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                panic!("pc: {:x}, timestamp: {}, insn: {:?}", pc, timestamp, insn_to_resolve);
-             }
+                panic!(
+                    "pc: {:x}, timestamp: {}, insn: {:?}",
+                    pc, timestamp, insn_to_resolve
+                );
+            }
             let taken = bp_counter.predict(pc, false);
-            if !taken { // reverse as we mispredicted
-                let new_pc = (pc as i64 + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
-                bus.broadcast(Entry::new_timed_event(Event::TakenBranch, timestamp, pc, new_pc));
+            if !taken {
+                // reverse as we mispredicted
+                let new_pc = (pc as i64
+                    + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                    as u64;
+                bus.broadcast(Entry::new_timed_event(
+                    Event::TakenBranch,
+                    timestamp,
+                    pc,
+                    new_pc,
+                ));
                 pc = new_pc;
             } else {
                 let new_pc = pc + insn_to_resolve.len as u64;
-                bus.broadcast(Entry::new_timed_event(Event::NonTakenBranch, timestamp, pc, new_pc));
+                bus.broadcast(Entry::new_timed_event(
+                    Event::NonTakenBranch,
+                    timestamp,
+                    pc,
+                    new_pc,
+                ));
                 pc = new_pc;
             }
-        } else  {
+        } else {
             // trace!("pc before step_bb: {:x}", pc);
             pc = step_bb(pc, &insn_map, &mut bus, &br_mode);
             let insn_to_resolve = insn_map.get(&pc).unwrap();
@@ -312,41 +373,77 @@ fn trace_decoder(args: &Args, mut bus: Bus<Entry>) -> Result<()> {
             match packet.f_header {
                 FHeader::FTb => {
                     if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                       bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                       panic!("pc: {:x}, timestamp: {}, insn: {:?}", pc, timestamp, insn_to_resolve);
+                        bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
+                        panic!(
+                            "pc: {:x}, timestamp: {}, insn: {:?}",
+                            pc, timestamp, insn_to_resolve
+                        );
                     }
-                    let new_pc = (pc as i64 + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
-                    bus.broadcast(Entry::new_timed_event(Event::TakenBranch, timestamp, pc, new_pc));
+                    let new_pc = (pc as i64
+                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                        as u64;
+                    bus.broadcast(Entry::new_timed_event(
+                        Event::TakenBranch,
+                        timestamp,
+                        pc,
+                        new_pc,
+                    ));
                     // trace!("pc before br: {:x}, after taken branch: {:x}", pc, new_pc);
                     pc = new_pc;
                 }
                 FHeader::FNt => {
                     if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                         bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!("pc: {:x}, timestamp: {}, insn: {:?}", pc, timestamp, insn_to_resolve);
+                        panic!(
+                            "pc: {:x}, timestamp: {}, insn: {:?}",
+                            pc, timestamp, insn_to_resolve
+                        );
                     }
                     let new_pc = pc + insn_to_resolve.len as u64;
-                    bus.broadcast(Entry::new_timed_event(Event::NonTakenBranch, timestamp, pc, new_pc));
+                    bus.broadcast(Entry::new_timed_event(
+                        Event::NonTakenBranch,
+                        timestamp,
+                        pc,
+                        new_pc,
+                    ));
                     // trace!("pc before nt: {:x}, after nt: {:x}", pc, new_pc);
                     pc = new_pc;
                 }
                 FHeader::FIj => {
                     if !IJ_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                         bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!("pc: {:x}, timestamp: {}, insn: {:?}", pc, timestamp, insn_to_resolve);
+                        panic!(
+                            "pc: {:x}, timestamp: {}, insn: {:?}",
+                            pc, timestamp, insn_to_resolve
+                        );
                     }
-                    let new_pc = (pc as i64 + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
-                    bus.broadcast(Entry::new_timed_event(Event::InferrableJump, timestamp, pc, new_pc));
+                    let new_pc = (pc as i64
+                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                        as u64;
+                    bus.broadcast(Entry::new_timed_event(
+                        Event::InferrableJump,
+                        timestamp,
+                        pc,
+                        new_pc,
+                    ));
                     // trace!("pc before ij: {:x}, after ij: {:x}", pc, new_pc);
                     pc = new_pc;
                 }
                 FHeader::FUj => {
                     if !UJ_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                         bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!("pc: {:x}, timestamp: {}, insn: {:?}", pc, timestamp, insn_to_resolve);
+                        panic!(
+                            "pc: {:x}, timestamp: {}, insn: {:?}",
+                            pc, timestamp, insn_to_resolve
+                        );
                     }
                     let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
-                    bus.broadcast(Entry::new_timed_event(Event::UninferableJump, timestamp, pc, new_pc));
+                    bus.broadcast(Entry::new_timed_event(
+                        Event::UninferableJump,
+                        timestamp,
+                        pc,
+                        new_pc,
+                    ));
                     // trace!("pc before uj: {:x}, after uj: {:x}", pc, new_pc);
                     pc = new_pc;
                 }
@@ -369,6 +466,13 @@ fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
+    let runtime_cfg = {
+        let trace_file = File::open(args.encoded_trace.clone())?;
+        let mut trace_reader = BufReader::new(trace_file);
+        let (_, cfg) = frontend::packet::read_first_packet(&mut trace_reader)?;
+        cfg
+    };
+
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
 
@@ -380,9 +484,13 @@ fn main() -> Result<()> {
         // close the file
         drop(encoded_trace_file);
         let stats_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(StatsReceiver::new(stats_bus_endpoint, BrMode::from(args.br_mode), file_size)));
+        receivers.push(Box::new(StatsReceiver::new(
+            stats_bus_endpoint,
+            runtime_cfg.br_mode,
+            file_size,
+        )));
     }
-    
+
     // add a receiver to the bus for txt output
     if args.to_txt {
         let txt_bus_endpoint = bus.add_rx();
@@ -399,40 +507,59 @@ fn main() -> Result<()> {
         receivers.push(Box::new(atomic_rx));
     }
 
-
     if args.to_afdo {
         let afdo_bus_endpoint = bus.add_rx();
         let mut elf_file = File::open(args.binary.clone())?;
         let mut elf_buffer = Vec::new();
         elf_file.read_to_end(&mut elf_buffer)?;
         let elf = object::File::parse(&*elf_buffer)?;
-        receivers.push(Box::new(AfdoReceiver::new(afdo_bus_endpoint, elf.entry().clone())));
+        receivers.push(Box::new(AfdoReceiver::new(
+            afdo_bus_endpoint,
+            elf.entry().clone(),
+        )));
         drop(elf_file);
     }
 
     if args.to_gcda {
         let gcda_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(GcdaReceiver::new(gcda_bus_endpoint, args.gcno.clone(), args.binary.clone())));
+        receivers.push(Box::new(GcdaReceiver::new(
+            gcda_bus_endpoint,
+            args.gcno.clone(),
+            args.binary.clone(),
+        )));
     }
 
     if args.to_speedscope {
         let speedscope_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(SpeedscopeReceiver::new(speedscope_bus_endpoint, args.binary.clone())));
+        receivers.push(Box::new(SpeedscopeReceiver::new(
+            speedscope_bus_endpoint,
+            args.binary.clone(),
+        )));
     }
 
     if args.to_perfetto {
         let perfetto_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(PerfettoReceiver::new(perfetto_bus_endpoint, args.binary.clone())));
+        receivers.push(Box::new(PerfettoReceiver::new(
+            perfetto_bus_endpoint,
+            args.binary.clone(),
+        )));
     }
 
     if args.to_vpp {
         let vpp_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(VPPReceiver::new(vpp_bus_endpoint, args.binary.clone(), args.br_mode == 0)));
+        receivers.push(Box::new(VPPReceiver::new(
+            vpp_bus_endpoint,
+            args.binary.clone(),
+            runtime_cfg.br_mode == BrMode::BrTarget,
+        )));
     }
 
     if args.to_foc {
         let foc_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(FOCReceiver::new(foc_bus_endpoint, args.binary.clone())));
+        receivers.push(Box::new(FOCReceiver::new(
+            foc_bus_endpoint,
+            args.binary.clone(),
+        )));
     }
 
     if args.to_vbb {
@@ -440,8 +567,12 @@ fn main() -> Result<()> {
         receivers.push(Box::new(VBBReceiver::new(vbb_bus_endpoint)));
     }
 
-    let frontend_handle = thread::spawn(move || trace_decoder(&args, bus));
-    let receiver_handles: Vec<_> = receivers.into_iter()
+    let args_for_frontend = args.clone();
+    let runtime_cfg_for_frontend = runtime_cfg.clone();
+    let frontend_handle =
+        thread::spawn(move || trace_decoder(args_for_frontend, runtime_cfg_for_frontend, bus));
+    let receiver_handles: Vec<_> = receivers
+        .into_iter()
         .map(|mut receiver| thread::spawn(move || receiver.try_receive_loop()))
         .collect();
 

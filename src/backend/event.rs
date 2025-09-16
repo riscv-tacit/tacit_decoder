@@ -1,5 +1,5 @@
-use rvdasm::insn::Insn;
 use crate::frontend::trap_type::TrapType;
+use rvdasm::insn::Insn;
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -16,7 +16,7 @@ pub enum Event {
     TrapReturn,
     BPHit,
     BPMiss,
-    Panic
+    Panic,
 }
 
 impl Event {
@@ -58,14 +58,29 @@ pub struct Entry {
 
 impl Entry {
     pub fn new_timed_event(event: Event, timestamp: u64, from: u64, to: u64) -> Self {
-        Self { event, arc: (from, to), insn: None, timestamp: Some(timestamp) }
+        Self {
+            event,
+            arc: (from, to),
+            insn: None,
+            timestamp: Some(timestamp),
+        }
     }
 
     pub fn new_insn(insn: &Insn, address: u64) -> Self {
-        Self { event: Event::None, arc: (address, address + insn.get_len() as u64), insn: Some(insn.clone()), timestamp: None }
+        Self {
+            event: Event::None,
+            arc: (address, address + insn.get_len() as u64),
+            insn: Some(insn.clone()),
+            timestamp: None,
+        }
     }
 
     pub fn new_timed_trap(trap_type: TrapType, timestamp: u64, from: u64, to: u64) -> Self {
-        Self { event: Event::from_trap_type(trap_type), arc: (from, to), insn: None, timestamp: Some(timestamp) }
+        Self {
+            event: Event::from_trap_type(trap_type),
+            arc: (from, to),
+            insn: None,
+            timestamp: Some(timestamp),
+        }
     }
 }

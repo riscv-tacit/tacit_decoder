@@ -1,7 +1,7 @@
 use crate::frontend::br_mode::*;
 use crate::frontend::ctx_mode::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeCfg {
     pub br_mode: BrMode,
     pub bp_entries: u64,
