@@ -98,8 +98,14 @@ struct Args {
     #[arg(short, long)]
     encoded_trace: Option<String>,
     // path to the binary file
-    #[arg(short, long)]
-    binary: Option<String>,
+    #[arg(long)]
+    application_binary: Option<String>,
+    // path to the sbi binary file
+    #[arg(long)]
+    sbi_binary: Option<String>,
+    // path to the kernel binary file
+    #[arg(long)]
+    kernel_binary: Option<String>,
     // optionally write the final receiver config to JSON
     #[arg(long)]
     dump_effective_config: Option<String>,
@@ -148,7 +154,9 @@ struct Args {
 #[serde(default)]
 struct DecoderStaticCfg {
     encoded_trace: String,
-    binary: String,
+    application_binary: String,
+    sbi_binary: String,
+    kernel_binary: String,
     header_only: bool,
     to_stats: bool,
     to_txt: bool,
@@ -229,7 +237,7 @@ fn step_bb_until(
 
 // frontend decoding packets and pushing entries to the bus
 fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, mut bus: Bus<Entry>) -> Result<()> {
-    let mut elf_file = File::open(static_cfg.binary.clone())?;
+    let mut elf_file = File::open(static_cfg.application_binary.clone())?;
     let mut elf_buffer = Vec::new();
     elf_file.read_to_end(&mut elf_buffer)?;
     let elf = object::File::parse(&*elf_buffer)?;
@@ -518,7 +526,9 @@ fn main() -> Result<()> {
 
     // Resolve toggles: config file takes precedence if provided; otherwise use CLI flags
     let encoded_trace = pick_arg(args.encoded_trace, file_cfg.encoded_trace);
-    let binary = pick_arg(args.binary, file_cfg.binary);
+    let application_binary = pick_arg(args.application_binary, file_cfg.application_binary);
+    let sbi_binary = pick_arg(args.sbi_binary, file_cfg.sbi_binary);
+    let kernel_binary = pick_arg(args.kernel_binary, file_cfg.kernel_binary);
     let header_only = pick_arg(args.header_only, file_cfg.header_only);
     let to_stats = pick_arg(args.to_stats, file_cfg.to_stats);
     let to_txt = pick_arg(args.to_txt, file_cfg.to_txt);
@@ -532,11 +542,17 @@ fn main() -> Result<()> {
     let to_vpp = pick_arg(args.to_vpp, file_cfg.to_vpp);
     let to_foc = pick_arg(args.to_foc, file_cfg.to_foc);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
-    let static_cfg = DecoderStaticCfg { encoded_trace, binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
+    let static_cfg = DecoderStaticCfg { encoded_trace, application_binary, sbi_binary, kernel_binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
 
     // verify the binary exists and is a file
-    if !Path::new(&static_cfg.binary).exists() || !Path::new(&static_cfg.binary).is_file() {
-        return Err(anyhow::anyhow!("Binary file is not valid: {}", static_cfg.binary));
+    if !Path::new(&static_cfg.application_binary).exists() || !Path::new(&static_cfg.application_binary).is_file() {
+        return Err(anyhow::anyhow!("Application binary file is not valid: {}", static_cfg.application_binary));
+    }
+    if static_cfg.sbi_binary != "" && !Path::new(&static_cfg.sbi_binary).exists() || !Path::new(&static_cfg.sbi_binary).is_file() {
+        return Err(anyhow::anyhow!("SBI binary file is not valid: {}", static_cfg.sbi_binary));
+    }
+    if static_cfg.kernel_binary != "" && !Path::new(&static_cfg.kernel_binary).exists() || !Path::new(&static_cfg.kernel_binary).is_file() {
+        return Err(anyhow::anyhow!("Kernel binary file is not valid: {}", static_cfg.kernel_binary));
     }
 
     // verify the encoded trace exists and is a file
@@ -581,18 +597,18 @@ fn main() -> Result<()> {
     }
 
     if to_stack_txt {
-        let stack_txt_rx = StackTxtReceiver::new(bus.add_rx(), static_cfg.binary.clone());
+        let stack_txt_rx = StackTxtReceiver::new(bus.add_rx(), static_cfg.application_binary.clone());
         receivers.push(Box::new(stack_txt_rx));
     }
 
     if to_atomics {
-        let atomic_rx = AtomicReceiver::new(bus.add_rx(), static_cfg.binary.clone());
+        let atomic_rx = AtomicReceiver::new(bus.add_rx(), static_cfg.application_binary.clone());
         receivers.push(Box::new(atomic_rx));
     }
 
     if to_afdo {
         let afdo_bus_endpoint = bus.add_rx();
-        let mut elf_file = File::open(static_cfg.binary.clone())?;
+        let mut elf_file = File::open(static_cfg.application_binary.clone())?;
         let mut elf_buffer = Vec::new();
         elf_file.read_to_end(&mut elf_buffer)?;
         let elf = object::File::parse(&*elf_buffer)?;
@@ -608,7 +624,7 @@ fn main() -> Result<()> {
         receivers.push(Box::new(GcdaReceiver::new(
             gcda_bus_endpoint,
             gcno_path.clone(),
-            static_cfg.binary.clone(),
+            static_cfg.application_binary.clone(),
         )));
     }
 
@@ -616,7 +632,7 @@ fn main() -> Result<()> {
         let speedscope_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(SpeedscopeReceiver::new(
             speedscope_bus_endpoint,
-            static_cfg.binary.clone(),
+            static_cfg.application_binary.clone(),
         )));
     }
 
@@ -624,7 +640,7 @@ fn main() -> Result<()> {
         let perfetto_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(PerfettoReceiver::new(
             perfetto_bus_endpoint,
-            static_cfg.binary.clone(),
+            static_cfg.application_binary.clone(),
         )));
     }
 
@@ -632,7 +648,7 @@ fn main() -> Result<()> {
         let vpp_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(VPPReceiver::new(
             vpp_bus_endpoint,
-            static_cfg.binary.clone(),
+            static_cfg.application_binary.clone(),
             runtime_cfg.br_mode == BrMode::BrTarget,
         )));
     }
@@ -641,7 +657,7 @@ fn main() -> Result<()> {
         let foc_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(FOCReceiver::new(
             foc_bus_endpoint,
-            static_cfg.binary.clone(),
+            static_cfg.application_binary.clone(),
         )));
     }
 
