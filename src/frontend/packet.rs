@@ -7,18 +7,19 @@ use crate::frontend::br_mode::*;
 use crate::frontend::c_header::*;
 use crate::frontend::ctx_mode::*;
 use crate::frontend::f_header::*;
+use crate::frontend::prv::*;
 use crate::frontend::runtime_cfg::*;
 use crate::frontend::sync_type::*;
 use crate::frontend::trap_type::*;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SubFunc3 {
     None,
     TrapType(TrapType),
     SyncType(SyncType), // unused for now
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Packet {
     pub is_compressed: bool,
     pub c_header: CHeader,
@@ -27,6 +28,8 @@ pub struct Packet {
     pub target_address: u64,
     pub from_address: u64,
     pub _ctx: u64, // unused for now
+    pub target_prv: Prv,
+    pub from_prv: Prv,
     pub timestamp: u64,
 }
 
@@ -41,6 +44,8 @@ impl Packet {
             target_address: 0,
             from_address: 0,
             _ctx: 0,
+            target_prv: Prv::PrvUser,
+            from_prv: Prv::PrvUser,
             timestamp: 0,
         }
     }
@@ -58,6 +63,7 @@ const VAR_OFFSET: u8 = 7;
 const VAR_VAL_MASK: u8 = 0b0111_1111;
 
 fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
+    trace!("reading varint");
     let mut result = Vec::new();
     loop {
         let byte = read_u8(stream)?;
@@ -71,6 +77,14 @@ fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
         .iter()
         .rev()
         .fold(0, |acc, &x| (acc << VAR_OFFSET) | (x & VAR_VAL_MASK) as u64))
+}
+
+fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
+    let result = read_u8(stream)?;
+    let from_prv = Prv::from((result & 0b111) as u64);
+    let target_prv = Prv::from(((result >> 3) & 0b111) as u64);
+    assert!(0b10 == (result >> 6 & 0b11), "checksum for prv byte should be 0b10");
+    Ok((from_prv, target_prv))
 }
 
 pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
@@ -118,8 +132,11 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     let trap_type =
                         TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
                     packet.func3 = SubFunc3::TrapType(trap_type);
-                    packet.from_address = read_varint(stream)?;
+                    let (from_prv, target_prv) = read_prv(stream)?;
+                    packet.from_prv = from_prv;
+                    packet.target_prv = target_prv;
                     packet.target_address = read_varint(stream)?;
+                    packet.from_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
@@ -166,7 +183,12 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
     packet.c_header = c_header;
     packet.f_header = f_header;
     packet.func3 = SubFunc3::SyncType(sync_type);
-    
+    assert!(packet.func3 == SubFunc3::SyncType(SyncType::SyncStart), "func3 should be SyncStart");
+
+    let (from_prv, target_prv) = read_prv(stream)?;
+    packet.from_prv = from_prv;
+    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
+    packet.target_prv = target_prv;
     packet.target_address = read_varint(stream)?;
     packet.timestamp = read_varint(stream)?;
 
@@ -179,9 +201,6 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
     let ctx_mode = CtxMode::from(ctx_mode_raw);
 
     let ctx_id = read_varint(stream)?;
-
-    packet.target_address = read_varint(stream)?;
-    packet.timestamp = read_varint(stream)?;
 
     Ok((
         packet,

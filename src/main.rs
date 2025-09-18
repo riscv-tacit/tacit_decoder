@@ -10,6 +10,7 @@ mod frontend {
     pub mod br_mode;
     pub mod c_header;
     pub mod ctx_mode;
+    pub mod prv;
     pub mod f_header;
     pub mod packet;
     pub mod runtime_cfg;
@@ -55,6 +56,7 @@ use std::thread;
 // frontend dependency
 use frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use frontend::br_mode::BrMode;
+use frontend::prv::Prv;
 use frontend::runtime_cfg::DecoderRuntimeCfg;
 // backend dependency
 use backend::abstract_receiver::AbstractReceiver;
@@ -157,6 +159,7 @@ struct DecoderStaticCfg {
     application_binary: String,
     sbi_binary: String,
     kernel_binary: String,
+    driver_binary_entry_tuples: Vec<(String, String)>,
     header_only: bool,
     to_stats: bool,
     to_txt: bool,
@@ -218,7 +221,7 @@ fn step_bb_until(
     target_pc: u64,
     bus: &mut Bus<Entry>,
 ) -> u64 {
-    // println!("stepping bb from pc: {:x} until pc: {:x}", pc, target_pc);
+    debug!("stepping bb from pc: {:x} until pc: {:x}", pc, target_pc);
     let mut pc = pc;
 
     loop {
@@ -237,58 +240,130 @@ fn step_bb_until(
 
 // frontend decoding packets and pushing entries to the bus
 fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, mut bus: Bus<Entry>) -> Result<()> {
-    let mut elf_file = File::open(static_cfg.application_binary.clone())?;
-    let mut elf_buffer = Vec::new();
-    elf_file.read_to_end(&mut elf_buffer)?;
-    let elf = object::File::parse(&*elf_buffer)?;
-    let elf_arch = elf.architecture();
+    let mut u_elf_file = File::open(static_cfg.application_binary.clone())?;
+    let mut u_elf_buffer = Vec::new();
+    u_elf_file.read_to_end(&mut u_elf_buffer)?;
+    let u_elf = object::File::parse(&*u_elf_buffer)?;
+    let u_elf_arch = u_elf.architecture();
 
-    let xlen = if elf_arch == object::Architecture::Riscv64 {
+    let xlen = if u_elf_arch == object::Architecture::Riscv64 {
         Xlen::XLEN64
-    } else if elf_arch == object::Architecture::Riscv32 {
+    } else if u_elf_arch == object::Architecture::Riscv32 {
         Xlen::XLEN32
     } else {
-        panic!("Unsupported architecture: {:?}", elf_arch);
+        panic!("Unsupported architecture: {:?}", u_elf_arch);
     };
 
     let dasm = Disassembler::new(xlen);
+     
+    /* produce the instruction maps for all ELF files */
 
-    let mut insn_map = HashMap::new();
-    for section in elf.sections() {
+    // user-space instruction map
+    let mut u_insn_map = HashMap::new();
+    for section in u_elf.sections() {
         if let object::SectionFlags::Elf { sh_flags } = section.flags() {
             if sh_flags & (SHF_EXECINSTR as u64) != 0 {
                 let addr = section.address();
                 let data = section.data()?;
                 let sec_map = dasm.disassemble_all(&data, addr);
                 debug!(
-                    "section `{}` @ {:#x}: {} insns",
+                    "user applicationsection `{}` @ {:#x}: {} insns",
                     section.name().unwrap_or("<unnamed>"),
                     addr,
                     sec_map.len()
                 );
-                insn_map.extend(sec_map);
+                u_insn_map.extend(sec_map);
             }
         }
     }
-    if insn_map.is_empty() {
+    if u_insn_map.is_empty() {
         return Err(anyhow::anyhow!(
             "No executable instructions found in ELF file"
         ));
     }
-    debug!("[main] found {} instructions", insn_map.len());
+    debug!("[main] found {} instructions", u_insn_map.len());
+
+
+    // kernel-space instruction map
+    let mut k_elf_file = File::open(static_cfg.kernel_binary.clone())?;
+    let mut k_elf_buffer = Vec::new();
+    k_elf_file.read_to_end(&mut k_elf_buffer)?;
+    let k_elf = object::File::parse(&*k_elf_buffer)?;
+    let k_elf_arch = k_elf.architecture();
+    assert!(k_elf_arch == u_elf_arch, "Kernel and user ELF architectures must match");
+    
+    let mut k_insn_map = HashMap::new();
+    for section in k_elf.sections() {
+        if let object::SectionFlags::Elf { sh_flags } = section.flags() {
+            if sh_flags & (SHF_EXECINSTR as u64) != 0 {
+                let addr = section.address();
+                let data = section.data()?;
+                let sec_map = dasm.disassemble_all(&data, addr);
+                debug!(
+                    "kernel binary section `{}` @ {:#x}: {} insns",
+                    section.name().unwrap_or("<unnamed>"),
+                    addr,
+                    sec_map.len()
+                );
+                k_insn_map.extend(sec_map);
+            }
+        }
+    }
+    if k_insn_map.is_empty() {
+        return Err(anyhow::anyhow!("No executable instructions found in ELF file"));
+    }
+
+    debug!("[main] found {} kernel-space instructions", k_insn_map.len());
+
+    // driver-space instruction map, add to k_insn_map
+    for (binary, entry) in static_cfg.driver_binary_entry_tuples {
+        let mut driver_elf_file = File::open(binary.clone())?;
+        let mut driver_elf_buffer = Vec::new();
+        driver_elf_file.read_to_end(&mut driver_elf_buffer)?;
+        let driver_elf = object::File::parse(&*driver_elf_buffer)?;
+        let driver_elf_arch = driver_elf.architecture();
+        assert!(driver_elf_arch == u_elf_arch, "Driver and user ELF architectures must match");
+        let driver_text_section = driver_elf.section_by_name(".text").ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
+        let driver_text_data = driver_text_section.data()?;
+        let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
+        let driver_insn_map = dasm.disassemble_all(&driver_text_data, driver_entry_point);
+        debug!(
+            "driver binary `{}` @ {:#x}: {} insns",
+            binary, driver_entry_point, driver_insn_map.len()
+        );
+        k_insn_map.extend(driver_insn_map);
+    }
+
+    // machine-space instruction map
+    let mut m_elf_file = File::open(static_cfg.sbi_binary.clone())?;
+    let mut m_elf_buffer = Vec::new();
+    m_elf_file.read_to_end(&mut m_elf_buffer)?;
+    let m_elf = object::File::parse(&*m_elf_buffer)?;
+    let m_elf_arch = m_elf.architecture();
+    assert!(m_elf_arch == u_elf_arch, "Machine and user ELF architectures must match");
+    let m_text_section = m_elf.section_by_name(".text").ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
+    let m_text_data = m_text_section.data()?;
+    let m_entry_point = m_elf.entry();
+    
+    let m_insn_map = dasm.disassemble_all(&m_text_data, m_entry_point);
+    if m_insn_map.is_empty() {
+        return Err(anyhow::anyhow!("No executable instructions found in ELF file"));
+    }
+    debug!("[main] found {} machine-space instructions", m_insn_map.len());
+
+    /* ingest the trace stream */
 
     let encoded_trace_file = File::open(static_cfg.encoded_trace.clone())?;
     let mut encoded_trace_reader: BufReader<File> = BufReader::new(encoded_trace_file);
 
-    let (packet, header_cfg) = frontend::packet::read_first_packet(&mut encoded_trace_reader)?;
-    if header_cfg != runtime_cfg {
-        return Err(anyhow::anyhow!(
-            "runtime configuration mismatch between CLI pre-read and trace header"
-        ));
-    }
+    // read the first packet
+    let (first_packet, _) = frontend::packet::read_first_packet(&mut encoded_trace_reader)?;
 
     if static_cfg.header_only {
-        println!("Printing header configuration: {:?}", header_cfg);
+        println!("Printing header configuration: {:?}", runtime_cfg);
+        println!("Printing first packet: {:?}", first_packet);
+        println!("Printing starting address: 0x{:x}", refund_addr(first_packet.target_address));
+        println!("Printing starting prv: {:?}", first_packet.target_prv);
         std::process::exit(0);
     }
 
@@ -299,28 +374,42 @@ fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, m
 
     let mut packet_count = 0;
 
-    trace!("packet: {:?}", packet);
-    let mut pc = refund_addr(packet.target_address);
-    let mut timestamp = packet.timestamp;
+    trace!("first packet: {:?}", first_packet);
+    let mut pc = refund_addr(first_packet.target_address);
+    let mut timestamp = first_packet.timestamp;
+    let mut prv = first_packet.target_prv;
     bus.broadcast(Entry::new_timed_event(
         Event::Start,
-        packet.timestamp,
+        first_packet.timestamp,
         pc,
         0,
     ));
 
+    let get_insn_map = |prv: Prv| -> &HashMap<u64, Insn> {
+        trace!("getting insn map for prv: {:?}", prv);
+        match prv {
+            Prv::PrvUser => &u_insn_map,
+            Prv::PrvSupervisor => &k_insn_map,
+            Prv::PrvMachine => &m_insn_map,
+            _ => panic!("Invalid Prv: {:?}", prv),
+        }
+    };
+
     while let Ok(packet) = frontend::packet::read_packet(&mut encoded_trace_reader) {
         packet_count += 1;
         // special handling for the last packet, should be unlikely hinted
-        trace!("[{}]: packet: {:?}", packet_count, packet);
+        debug!("[{}]: packet: {:?}", packet_count, packet);
         if packet.f_header == FHeader::FSync {
-            pc = step_bb_until(pc, &insn_map, refund_addr(packet.target_address), &mut bus);
+            pc = step_bb_until(pc, get_insn_map(prv), refund_addr(packet.target_address), &mut bus);
             println!("detected FSync packet, trace ending!");
             bus.broadcast(Entry::new_timed_event(Event::End, packet.timestamp, pc, 0));
             break;
         } else if packet.f_header == FHeader::FTrap {
-            pc = step_bb_until(pc, &insn_map, refund_addr(packet.from_address), &mut bus);
+            pc = step_bb_until(pc, get_insn_map(prv), refund_addr(packet.from_address), &mut bus);
             pc = refund_addr(packet.target_address ^ (pc >> 1));
+            debug!("pc after FTrap packet: {:x}", pc);
+            // assert!(prv == packet.from_prv, "prv mismatch in FTrap packet, expected {:?}, got {:?}", packet.from_prv, prv);
+            prv = packet.target_prv;
             timestamp += packet.timestamp;
             if let frontend::packet::SubFunc3::TrapType(trap_type) = packet.func3 {
                 bus.broadcast(Entry::new_timed_trap(
@@ -342,8 +431,8 @@ fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, m
             ));
             // predict for timestamp times
             for _ in 0..packet.timestamp {
-                pc = step_bb(pc, &insn_map, &mut bus, &br_mode);
-                let insn_to_resolve = insn_map.get(&pc).unwrap();
+                pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
+                let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
                 if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                     bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
                     panic!(
@@ -378,8 +467,8 @@ fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, m
             // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::new_timed_event(Event::BPMiss, timestamp, pc, pc));
-            pc = step_bb(pc, &insn_map, &mut bus, &br_mode);
-            let insn_to_resolve = insn_map.get(&pc).unwrap();
+            pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
+            let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
             if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
                 bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
                 panic!(
@@ -412,8 +501,8 @@ fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, m
             }
         } else {
             // trace!("pc before step_bb: {:x}", pc);
-            pc = step_bb(pc, &insn_map, &mut bus, &br_mode);
-            let insn_to_resolve = insn_map.get(&pc).unwrap();
+            pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
+            let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
             // trace!("pc after step_bb: {:x}", pc);
             timestamp += packet.timestamp;
             match packet.f_header {
@@ -498,7 +587,6 @@ fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, m
                     panic!("unknown FHeader: {:?}", packet.f_header);
                 }
             }
-            // log the timestamp
         }
     }
 
@@ -527,8 +615,9 @@ fn main() -> Result<()> {
     // Resolve toggles: config file takes precedence if provided; otherwise use CLI flags
     let encoded_trace = pick_arg(args.encoded_trace, file_cfg.encoded_trace);
     let application_binary = pick_arg(args.application_binary, file_cfg.application_binary);
-    let sbi_binary = pick_arg(args.sbi_binary, file_cfg.sbi_binary);
     let kernel_binary = pick_arg(args.kernel_binary, file_cfg.kernel_binary);
+    let driver_binary_entry_tuples = file_cfg.driver_binary_entry_tuples;
+    let sbi_binary = pick_arg(args.sbi_binary, file_cfg.sbi_binary);
     let header_only = pick_arg(args.header_only, file_cfg.header_only);
     let to_stats = pick_arg(args.to_stats, file_cfg.to_stats);
     let to_txt = pick_arg(args.to_txt, file_cfg.to_txt);
@@ -542,7 +631,7 @@ fn main() -> Result<()> {
     let to_vpp = pick_arg(args.to_vpp, file_cfg.to_vpp);
     let to_foc = pick_arg(args.to_foc, file_cfg.to_foc);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
-    let static_cfg = DecoderStaticCfg { encoded_trace, application_binary, sbi_binary, kernel_binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
+    let static_cfg = DecoderStaticCfg { encoded_trace, application_binary, kernel_binary, driver_binary_entry_tuples, sbi_binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
 
     // verify the binary exists and is a file
     if !Path::new(&static_cfg.application_binary).exists() || !Path::new(&static_cfg.application_binary).is_file() {
@@ -565,11 +654,11 @@ fn main() -> Result<()> {
         serde_json::to_writer_pretty(&mut f, &static_cfg)?;
     }
 
-    let runtime_cfg = {
+
+    let (_, runtime_cfg) = {
         let trace_file = File::open(static_cfg.encoded_trace.clone())?;
         let mut trace_reader = BufReader::new(trace_file);
-        let (_, runtime_cfg) = frontend::packet::read_first_packet(&mut trace_reader)?;
-        runtime_cfg
+        frontend::packet::read_first_packet(&mut trace_reader)?
     };
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
