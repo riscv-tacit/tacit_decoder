@@ -3,8 +3,9 @@
   "application_binary": "../firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/trace-hello",
   "sbi_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin",
   "kernel_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin-dwarf",
+  "kernel_jump_label_patch_log": "configs/jump_label_patch_map.txt",
   "driver_binary_entry_tuples": [
-    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff0167d000"]
+    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff0177d000"]
   ],
   "header_only": false,
   "to_stats": false,

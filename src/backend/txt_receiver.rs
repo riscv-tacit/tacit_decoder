@@ -40,7 +40,7 @@ impl AbstractReceiver for TxtReceiver {
                     .unwrap();
                 if let Some(insn) = entry.insn {
                     self.writer
-                        .write_all(format!(" {}", insn.to_string()).as_bytes())
+                        .write_all(format!(" {}, raw: {:x}", insn.to_string(), insn.get_raw()).as_bytes())
                         .unwrap();
                 }
                 self.writer.write_all(b"\n").unwrap();
@@ -60,7 +60,7 @@ impl AbstractReceiver for TxtReceiver {
                     self.writer
                         .write_all(format!(" {}", entry.event.to_string()).as_bytes())
                         .unwrap();
-                    self.writer.write_all(b"\n").unwrap();
+                    self.writer.write_all(b"|").unwrap();
                 }
             }
         }

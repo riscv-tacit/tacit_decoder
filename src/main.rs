@@ -38,7 +38,7 @@ use frontend::f_header::FHeader;
 
 // file IO
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, BufRead, Read};
 // collections
 use std::collections::HashMap;
 // argparse dependency
@@ -159,6 +159,7 @@ struct DecoderStaticCfg {
     application_binary: String,
     sbi_binary: String,
     kernel_binary: String,
+    kernel_jump_label_patch_log: String,
     driver_binary_entry_tuples: Vec<(String, String)>,
     header_only: bool,
     to_stats: bool,
@@ -314,6 +315,23 @@ fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, m
     }
 
     debug!("[main] found {} kernel-space instructions", k_insn_map.len());
+
+    /* read the jump label patch log
+    example line: ffffffff800033f4,00000013
+    */
+    let jump_label_patch_log = File::open(static_cfg.kernel_jump_label_patch_log.clone())?;
+    let jump_label_patch_log_reader = BufReader::new(jump_label_patch_log);
+    for line in jump_label_patch_log_reader.lines() {
+        let line = line?;
+        let parts = line.split(",").collect::<Vec<&str>>();
+        let addr = u64::from_str_radix(parts[0], 16)?;
+        let raw_insn = u32::from_str_radix(parts[1], 16)?;
+        let new_insn = dasm.disassmeble_one(raw_insn).unwrap();
+        // replace the insn with the new insn
+        k_insn_map.insert(addr, new_insn);
+    }
+
+    debug!("[main] patched kernel-space instructions");
 
     // driver-space instruction map, add to k_insn_map
     for (binary, entry) in static_cfg.driver_binary_entry_tuples {
@@ -616,6 +634,7 @@ fn main() -> Result<()> {
     let encoded_trace = pick_arg(args.encoded_trace, file_cfg.encoded_trace);
     let application_binary = pick_arg(args.application_binary, file_cfg.application_binary);
     let kernel_binary = pick_arg(args.kernel_binary, file_cfg.kernel_binary);
+    let kernel_jump_label_patch_log = file_cfg.kernel_jump_label_patch_log;
     let driver_binary_entry_tuples = file_cfg.driver_binary_entry_tuples;
     let sbi_binary = pick_arg(args.sbi_binary, file_cfg.sbi_binary);
     let header_only = pick_arg(args.header_only, file_cfg.header_only);
@@ -631,7 +650,7 @@ fn main() -> Result<()> {
     let to_vpp = pick_arg(args.to_vpp, file_cfg.to_vpp);
     let to_foc = pick_arg(args.to_foc, file_cfg.to_foc);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
-    let static_cfg = DecoderStaticCfg { encoded_trace, application_binary, kernel_binary, driver_binary_entry_tuples, sbi_binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
+    let static_cfg = DecoderStaticCfg { encoded_trace, application_binary, kernel_binary, kernel_jump_label_patch_log, driver_binary_entry_tuples, sbi_binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
 
     // verify the binary exists and is a file
     if !Path::new(&static_cfg.application_binary).exists() || !Path::new(&static_cfg.application_binary).is_file() {
