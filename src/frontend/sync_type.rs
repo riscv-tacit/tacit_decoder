@@ -15,7 +15,7 @@ impl From<u8> for SyncType {
             0b000 => SyncType::SyncNone,
             0b001 => SyncType::SyncStart,
             0b010 => SyncType::SyncPeriodic,
-            0b100 => SyncType::SyncEnd,
+            0b011 => SyncType::SyncEnd,
             _ => panic!("Invalid SyncType value"),
         }
     }
