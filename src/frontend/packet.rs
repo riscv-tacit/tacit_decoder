@@ -7,7 +7,7 @@ use crate::frontend::br_mode::*;
 use crate::frontend::c_header::*;
 use crate::frontend::ctx_mode::*;
 use crate::frontend::f_header::*;
-use crate::frontend::prv::*;
+use crate::common::prv::*;
 use crate::frontend::runtime_cfg::*;
 use crate::frontend::sync_type::*;
 use crate::frontend::trap_type::*;

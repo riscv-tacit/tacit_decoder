@@ -5,18 +5,20 @@ extern crate gcno_reader;
 extern crate log;
 extern crate object;
 extern crate rvdasm;
+
 mod frontend {
     pub mod bp_double_saturating_counter;
     pub mod br_mode;
     pub mod c_header;
     pub mod ctx_mode;
-    pub mod prv;
     pub mod f_header;
     pub mod packet;
     pub mod runtime_cfg;
     pub mod sync_type;
     pub mod trap_type;
+    pub mod decoder;
 }
+
 mod backend {
     pub mod abstract_receiver;
     pub mod afdo_receiver;
@@ -34,35 +36,29 @@ mod backend {
     pub mod vpp_receiver;
 }
 
-use frontend::f_header::FHeader;
+mod common {
+    pub mod insn_index;
+    pub mod prv;
+}
 
 // file IO
 use std::fs::File;
-use std::io::{BufReader, BufRead, Read};
-// collections
-use std::collections::HashMap;
+use std::io::{BufReader, Read};
 // argparse dependency
 use clap::Parser;
-// objdump dependency
-use object::elf::SHF_EXECINSTR;
-use object::{Object, ObjectSection};
-use rvdasm::disassembler::*;
-use rvdasm::insn::*;
+use object::Object;
 // path dependency
 use std::path::Path;
 // bus dependency
 use bus::Bus;
 use std::thread;
 // frontend dependency
-use frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use frontend::br_mode::BrMode;
-use frontend::prv::Prv;
-use frontend::runtime_cfg::DecoderRuntimeCfg;
 // backend dependency
 use backend::abstract_receiver::AbstractReceiver;
 use backend::afdo_receiver::AfdoReceiver;
 use backend::atomic_receiver::AtomicReceiver;
-use backend::event::{Entry, Event};
+use backend::event::Entry;
 use backend::foc_receiver::FOCReceiver;
 use backend::gcda_receiver::GcdaReceiver;
 use backend::perfetto_receiver::PerfettoReceiver;
@@ -74,16 +70,8 @@ use backend::vbb_receiver::VBBReceiver;
 use backend::vpp_receiver::VPPReceiver;
 // error handling
 use anyhow::Result;
-// logging
-use log::{debug, trace};
 use serde::{Deserialize, Serialize};
 
-const BRANCH_OPCODES: &[&str] = &[
-    "beq", "bge", "bgeu", "blt", "bltu", "bne", "beqz", "bnez", "bgez", "blez", "bltz", "bgtz",
-    "bgt", "ble", "bgtu", "bleu", "c.beqz", "c.bnez", "c.bltz", "c.bgez",
-];
-const IJ_OPCODES: &[&str] = &["jal", "j", "call", "tail", "c.j", "c.jal"];
-const UJ_OPCODES: &[&str] = &["jalr", "jr", "c.jr", "c.jalr", "ret"];
 const BUS_SIZE: usize = 1024;
 
 #[derive(Clone, Parser)]
@@ -183,436 +171,6 @@ fn load_file_config(path: &str) -> Result<DecoderStaticCfg> {
     Ok(cfg)
 }
 
-fn refund_addr(addr: u64) -> u64 {
-    addr << 1
-}
-
-// step until encountering a br/jump
-fn step_bb(pc: u64, insn_map: &HashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode) -> u64 {
-    let mut pc = pc;
-    let stop_on_ij = *br_mode == BrMode::BrTarget;
-    loop {
-        trace!("stepping bb pc: {:x}", pc);
-        let insn = insn_map.get(&pc).unwrap();
-        bus.broadcast(Entry::new_insn(insn, pc));
-        if stop_on_ij {
-            if insn.is_branch() || insn.is_direct_jump() || insn.is_indirect_jump() {
-                break;
-            } else {
-                pc += insn.len as u64;
-            }
-        } else {
-            if insn.is_branch() || insn.is_indirect_jump() {
-                break;
-            } else if insn.is_direct_jump() {
-                let new_pc =
-                    (pc as i64 + insn.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
-                pc = new_pc;
-            } else {
-                pc += insn.len as u64;
-            }
-        }
-    }
-    pc
-}
-
-fn step_bb_until(
-    pc: u64,
-    insn_map: &HashMap<u64, Insn>,
-    target_pc: u64,
-    bus: &mut Bus<Entry>,
-) -> u64 {
-    debug!("stepping bb from pc: {:x} until pc: {:x}", pc, target_pc);
-    let mut pc = pc;
-
-    loop {
-        let insn = insn_map.get(&pc).unwrap();
-        bus.broadcast(Entry::new_insn(insn, pc));
-        if insn.is_branch() || insn.is_direct_jump() {
-            break;
-        }
-        if pc == target_pc {
-            break;
-        }
-        pc += insn.len as u64;
-    }
-    pc
-}
-
-// frontend decoding packets and pushing entries to the bus
-fn trace_decoder(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg, mut bus: Bus<Entry>) -> Result<()> {
-    let mut u_elf_file = File::open(static_cfg.application_binary.clone())?;
-    let mut u_elf_buffer = Vec::new();
-    u_elf_file.read_to_end(&mut u_elf_buffer)?;
-    let u_elf = object::File::parse(&*u_elf_buffer)?;
-    let u_elf_arch = u_elf.architecture();
-
-    let xlen = if u_elf_arch == object::Architecture::Riscv64 {
-        Xlen::XLEN64
-    } else if u_elf_arch == object::Architecture::Riscv32 {
-        Xlen::XLEN32
-    } else {
-        panic!("Unsupported architecture: {:?}", u_elf_arch);
-    };
-
-    let dasm = Disassembler::new(xlen);
-     
-    /* produce the instruction maps for all ELF files */
-
-    // user-space instruction map
-    let mut u_insn_map = HashMap::new();
-    for section in u_elf.sections() {
-        if let object::SectionFlags::Elf { sh_flags } = section.flags() {
-            if sh_flags & (SHF_EXECINSTR as u64) != 0 {
-                let addr = section.address();
-                let data = section.data()?;
-                let sec_map = dasm.disassemble_all(&data, addr);
-                debug!(
-                    "user applicationsection `{}` @ {:#x}: {} insns",
-                    section.name().unwrap_or("<unnamed>"),
-                    addr,
-                    sec_map.len()
-                );
-                u_insn_map.extend(sec_map);
-            }
-        }
-    }
-    if u_insn_map.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No executable instructions found in ELF file"
-        ));
-    }
-    debug!("[main] found {} instructions", u_insn_map.len());
-
-
-    // kernel-space instruction map
-    let mut k_elf_file = File::open(static_cfg.kernel_binary.clone())?;
-    let mut k_elf_buffer = Vec::new();
-    k_elf_file.read_to_end(&mut k_elf_buffer)?;
-    let k_elf = object::File::parse(&*k_elf_buffer)?;
-    let k_elf_arch = k_elf.architecture();
-    assert!(k_elf_arch == u_elf_arch, "Kernel and user ELF architectures must match");
-    
-    let mut k_insn_map = HashMap::new();
-    for section in k_elf.sections() {
-        if let object::SectionFlags::Elf { sh_flags } = section.flags() {
-            if sh_flags & (SHF_EXECINSTR as u64) != 0 {
-                let addr = section.address();
-                let data = section.data()?;
-                let sec_map = dasm.disassemble_all(&data, addr);
-                debug!(
-                    "kernel binary section `{}` @ {:#x}: {} insns",
-                    section.name().unwrap_or("<unnamed>"),
-                    addr,
-                    sec_map.len()
-                );
-                k_insn_map.extend(sec_map);
-            }
-        }
-    }
-    if k_insn_map.is_empty() {
-        return Err(anyhow::anyhow!("No executable instructions found in ELF file"));
-    }
-
-    debug!("[main] found {} kernel-space instructions", k_insn_map.len());
-
-    /* read the jump label patch log
-    example line: ffffffff800033f4,00000013
-    */
-    let jump_label_patch_log = File::open(static_cfg.kernel_jump_label_patch_log.clone())?;
-    let jump_label_patch_log_reader = BufReader::new(jump_label_patch_log);
-    for line in jump_label_patch_log_reader.lines() {
-        let line = line?;
-        let parts = line.split(",").collect::<Vec<&str>>();
-        let addr = u64::from_str_radix(parts[0], 16)?;
-        let raw_insn = u32::from_str_radix(parts[1], 16)?;
-        let new_insn = dasm.disassmeble_one(raw_insn).unwrap();
-        // replace the insn with the new insn
-        k_insn_map.insert(addr, new_insn);
-    }
-
-    debug!("[main] patched kernel-space instructions");
-
-    // driver-space instruction map, add to k_insn_map
-    for (binary, entry) in static_cfg.driver_binary_entry_tuples {
-        let mut driver_elf_file = File::open(binary.clone())?;
-        let mut driver_elf_buffer = Vec::new();
-        driver_elf_file.read_to_end(&mut driver_elf_buffer)?;
-        let driver_elf = object::File::parse(&*driver_elf_buffer)?;
-        let driver_elf_arch = driver_elf.architecture();
-        assert!(driver_elf_arch == u_elf_arch, "Driver and user ELF architectures must match");
-        let driver_text_section = driver_elf.section_by_name(".text").ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
-        let driver_text_data = driver_text_section.data()?;
-        let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
-        let driver_insn_map = dasm.disassemble_all(&driver_text_data, driver_entry_point);
-        debug!(
-            "driver binary `{}` @ {:#x}: {} insns",
-            binary, driver_entry_point, driver_insn_map.len()
-        );
-        k_insn_map.extend(driver_insn_map);
-    }
-
-    // machine-space instruction map
-    let mut m_elf_file = File::open(static_cfg.sbi_binary.clone())?;
-    let mut m_elf_buffer = Vec::new();
-    m_elf_file.read_to_end(&mut m_elf_buffer)?;
-    let m_elf = object::File::parse(&*m_elf_buffer)?;
-    let m_elf_arch = m_elf.architecture();
-    assert!(m_elf_arch == u_elf_arch, "Machine and user ELF architectures must match");
-    let m_text_section = m_elf.section_by_name(".text").ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
-    let m_text_data = m_text_section.data()?;
-    let m_entry_point = m_elf.entry();
-    
-    let m_insn_map = dasm.disassemble_all(&m_text_data, m_entry_point);
-    if m_insn_map.is_empty() {
-        return Err(anyhow::anyhow!("No executable instructions found in ELF file"));
-    }
-    debug!("[main] found {} machine-space instructions", m_insn_map.len());
-
-    /* ingest the trace stream */
-
-    let encoded_trace_file = File::open(static_cfg.encoded_trace.clone())?;
-    let mut encoded_trace_reader: BufReader<File> = BufReader::new(encoded_trace_file);
-
-    // read the first packet
-    let (first_packet, _) = frontend::packet::read_first_packet(&mut encoded_trace_reader)?;
-
-    if static_cfg.header_only {
-        println!("Printing header configuration: {:?}", runtime_cfg);
-        println!("Printing first packet: {:?}", first_packet);
-        println!("Printing starting address: 0x{:x}", refund_addr(first_packet.target_address));
-        println!("Printing starting prv: {:?}", first_packet.target_prv);
-        std::process::exit(0);
-    }
-
-    let mut bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
-
-    let br_mode = runtime_cfg.br_mode;
-    let mode_is_predict = br_mode == BrMode::BrPredict || br_mode == BrMode::BrHistory;
-
-    let mut packet_count = 0;
-
-    trace!("first packet: {:?}", first_packet);
-    let mut pc = refund_addr(first_packet.target_address);
-    let mut timestamp = first_packet.timestamp;
-    let mut prv = first_packet.target_prv;
-    bus.broadcast(Entry::new_timed_event(
-        Event::Start,
-        first_packet.timestamp,
-        pc,
-        0,
-    ));
-
-    let get_insn_map = |prv: Prv| -> &HashMap<u64, Insn> {
-        trace!("getting insn map for prv: {:?}", prv);
-        match prv {
-            Prv::PrvUser => &u_insn_map,
-            Prv::PrvSupervisor => &k_insn_map,
-            Prv::PrvMachine => &m_insn_map,
-            _ => panic!("Invalid Prv: {:?}", prv),
-        }
-    };
-
-    while let Ok(packet) = frontend::packet::read_packet(&mut encoded_trace_reader) {
-        packet_count += 1;
-        // special handling for the last packet, should be unlikely hinted
-        debug!("[{}]: packet: {:?}", packet_count, packet);
-        if packet.f_header == FHeader::FSync {
-            pc = step_bb_until(pc, get_insn_map(prv), refund_addr(packet.target_address), &mut bus);
-            println!("detected FSync packet, trace ending!");
-            bus.broadcast(Entry::new_timed_event(Event::End, packet.timestamp, pc, 0));
-            break;
-        } else if packet.f_header == FHeader::FTrap {
-            pc = step_bb_until(pc, get_insn_map(prv), refund_addr(packet.from_address), &mut bus);
-            pc = refund_addr(packet.target_address ^ (pc >> 1));
-            debug!("pc after FTrap packet: {:x}", pc);
-            // assert!(prv == packet.from_prv, "prv mismatch in FTrap packet, expected {:?}, got {:?}", packet.from_prv, prv);
-            prv = packet.target_prv;
-            timestamp += packet.timestamp;
-            if let frontend::packet::SubFunc3::TrapType(trap_type) = packet.func3 {
-                bus.broadcast(Entry::new_timed_trap(
-                    trap_type,
-                    timestamp,
-                    refund_addr(packet.from_address),
-                    pc,
-                ));
-            } else {
-                panic!("Invalid SubFunc3 for FTrap packet: {:?}", packet.func3);
-            }
-        } else if mode_is_predict && packet.f_header == FHeader::FTb {
-            // predicted hit
-            bus.broadcast(Entry::new_timed_event(
-                Event::BPHit,
-                packet.timestamp,
-                pc,
-                pc,
-            ));
-            // predict for timestamp times
-            for _ in 0..packet.timestamp {
-                pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
-                let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
-                if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                    bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                    panic!(
-                        "pc: {:x}, timestamp: {}, insn: {:?}",
-                        pc, timestamp, insn_to_resolve
-                    );
-                }
-                let taken = bp_counter.predict(pc, true);
-                if taken {
-                    let new_pc = (pc as i64
-                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                        as u64;
-                    bus.broadcast(Entry::new_timed_event(
-                        Event::TakenBranch,
-                        timestamp,
-                        pc,
-                        new_pc,
-                    ));
-                    pc = new_pc;
-                } else {
-                    let new_pc = pc + insn_to_resolve.len as u64;
-                    bus.broadcast(Entry::new_timed_event(
-                        Event::NonTakenBranch,
-                        timestamp,
-                        pc,
-                        new_pc,
-                    ));
-                    pc = new_pc;
-                }
-            }
-        } else if mode_is_predict && packet.f_header == FHeader::FNt {
-            // predicted miss
-            timestamp += packet.timestamp;
-            bus.broadcast(Entry::new_timed_event(Event::BPMiss, timestamp, pc, pc));
-            pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
-            let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
-            if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                panic!(
-                    "pc: {:x}, timestamp: {}, insn: {:?}",
-                    pc, timestamp, insn_to_resolve
-                );
-            }
-            let taken = bp_counter.predict(pc, false);
-            if !taken {
-                // reverse as we mispredicted
-                let new_pc = (pc as i64
-                    + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                    as u64;
-                bus.broadcast(Entry::new_timed_event(
-                    Event::TakenBranch,
-                    timestamp,
-                    pc,
-                    new_pc,
-                ));
-                pc = new_pc;
-            } else {
-                let new_pc = pc + insn_to_resolve.len as u64;
-                bus.broadcast(Entry::new_timed_event(
-                    Event::NonTakenBranch,
-                    timestamp,
-                    pc,
-                    new_pc,
-                ));
-                pc = new_pc;
-            }
-        } else {
-            // trace!("pc before step_bb: {:x}", pc);
-            pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
-            let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
-            // trace!("pc after step_bb: {:x}", pc);
-            timestamp += packet.timestamp;
-            match packet.f_header {
-                FHeader::FTb => {
-                    if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                        bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!(
-                            "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
-                        );
-                    }
-                    let new_pc = (pc as i64
-                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                        as u64;
-                    bus.broadcast(Entry::new_timed_event(
-                        Event::TakenBranch,
-                        timestamp,
-                        pc,
-                        new_pc,
-                    ));
-                    // trace!("pc before br: {:x}, after taken branch: {:x}", pc, new_pc);
-                    pc = new_pc;
-                }
-                FHeader::FNt => {
-                    if !BRANCH_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                        bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!(
-                            "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
-                        );
-                    }
-                    let new_pc = pc + insn_to_resolve.len as u64;
-                    bus.broadcast(Entry::new_timed_event(
-                        Event::NonTakenBranch,
-                        timestamp,
-                        pc,
-                        new_pc,
-                    ));
-                    // trace!("pc before nt: {:x}, after nt: {:x}", pc, new_pc);
-                    pc = new_pc;
-                }
-                FHeader::FIj => {
-                    if !IJ_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                        bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!(
-                            "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
-                        );
-                    }
-                    let new_pc = (pc as i64
-                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                        as u64;
-                    bus.broadcast(Entry::new_timed_event(
-                        Event::InferrableJump,
-                        timestamp,
-                        pc,
-                        new_pc,
-                    ));
-                    // trace!("pc before ij: {:x}, after ij: {:x}", pc, new_pc);
-                    pc = new_pc;
-                }
-                FHeader::FUj => {
-                    if !UJ_OPCODES.contains(&insn_to_resolve.get_name().as_str()) {
-                        bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                        panic!(
-                            "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
-                        );
-                    }
-                    let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
-                    bus.broadcast(Entry::new_timed_event(
-                        Event::UninferableJump,
-                        timestamp,
-                        pc,
-                        new_pc,
-                    ));
-                    // trace!("pc before uj: {:x}, after uj: {:x}", pc, new_pc);
-                    pc = new_pc;
-                }
-                _ => {
-                    bus.broadcast(Entry::new_timed_event(Event::Panic, 0, pc, 0));
-                    panic!("unknown FHeader: {:?}", packet.f_header);
-                }
-            }
-        }
-    }
-
-    drop(bus);
-    println!("[Success] Decoded {} packets", packet_count);
-
-    Ok(())
-}
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -674,11 +232,32 @@ fn main() -> Result<()> {
     }
 
 
-    let (_, runtime_cfg) = {
+    let (first_packet, runtime_cfg) = {
         let trace_file = File::open(static_cfg.encoded_trace.clone())?;
         let mut trace_reader = BufReader::new(trace_file);
         frontend::packet::read_first_packet(&mut trace_reader)?
     };
+
+    if static_cfg.header_only {
+        println!("Printing header configuration: {:?}", runtime_cfg);
+        println!("Printing first packet: {:?}", first_packet);
+        println!(
+            "Printing starting address: 0x{:x}",
+            (first_packet.target_address << 1)
+        );
+        println!("Printing starting prv: {:?}", first_packet.target_prv);
+        std::process::exit(0);
+    }
+
+    // Build instruction index once (for frontend; can be shared to backends later)
+    let insn_index = common::insn_index::build_instruction_index(
+        &static_cfg.application_binary,
+        &static_cfg.kernel_binary,
+        &static_cfg.sbi_binary,
+        &static_cfg.kernel_jump_label_patch_log,
+        &static_cfg.driver_binary_entry_tuples,
+    )?;
+    let insn_index = std::sync::Arc::new(insn_index);
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
@@ -774,8 +353,16 @@ fn main() -> Result<()> {
         receivers.push(Box::new(VBBReceiver::new(vbb_bus_endpoint)));
     }
 
-    let frontend_handle =
-        thread::spawn(move || trace_decoder(static_cfg.clone(), runtime_cfg.clone(), bus));
+    let encoded_trace_path = static_cfg.encoded_trace.clone();
+    let frontend_insn_index = std::sync::Arc::clone(&insn_index);
+    let frontend_handle = thread::spawn(move || {
+        frontend::decoder::decode_trace(
+            encoded_trace_path,
+            runtime_cfg.clone(),
+            frontend_insn_index,
+            bus,
+        )
+    });
     let receiver_handles: Vec<_> = receivers
         .into_iter()
         .map(|mut receiver| thread::spawn(move || receiver.try_receive_loop()))
