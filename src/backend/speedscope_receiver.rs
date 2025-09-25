@@ -1,19 +1,22 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, EventKind};
-use crate::backend::stack_unwinder::StackUnwinder;
-
+use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
+use crate::common::insn_index::InstructionIndex;
+use crate::common::prv::Prv;
+use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
-use std::fs::File;
-use std::io::{BufWriter, Write};
-
+use log::debug;
 use serde::Serialize;
 use serde_json::{json, Value};
-
-use log::{debug, warn};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::sync::Arc;
 
 #[derive(Serialize)]
-pub struct ProfileEntry {
-    r#type: String,
+struct ProfileEvent {
+    #[serde(rename = "type")]
+    kind: String,
     frame: u32,
     at: u64,
 }
@@ -22,40 +25,68 @@ pub struct SpeedscopeReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
     frames: Vec<Value>,
+    frame_lookup: HashMap<(Prv, u64), u32>,
     start: u64,
     end: u64,
-    profile_entries: Vec<ProfileEntry>,
-    stack_unwinder: StackUnwinder,
+    events: Vec<ProfileEvent>,
+    unwinder: StackUnwinder,
 }
 
 impl SpeedscopeReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, elf_path: String) -> Self {
+    pub fn new(
+        bus_rx: BusReader<Entry>,
+        symbols: Arc<SymbolIndex>,
+        insns: Arc<InstructionIndex>,
+    ) -> Self {
         debug!("SpeedscopeReceiver::new");
 
-        // create the stack unwinder
-        let stack_unwinder = StackUnwinder::new(elf_path.clone()).unwrap();
+        let unwinder = StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns))
+            .expect("stack unwinder");
 
-        // for each function symbol, add a frame to the frames vector
-        let mut frames = Vec::new();
-        for (_, func_info) in stack_unwinder.func_symbol_map().iter() {
-            frames.push(
-                json!({"name": func_info.name, "line": func_info.line, "file": func_info.file}),
-            );
-        }
+        let (frames, frame_lookup) = build_frames(&symbols);
 
         Self {
             writer: BufWriter::new(File::create("trace.speedscope.json").unwrap()),
             receiver: BusReceiver {
-                name: "speedscope".to_string(),
+                name: "speedscope".into(),
                 bus_rx,
                 checksum: 0,
             },
             frames,
+            frame_lookup,
             start: 0,
             end: 0,
-            stack_unwinder,
-            profile_entries: Vec::new(),
+            events: Vec::new(),
+            unwinder,
         }
+    }
+
+    fn record_stack_update(&mut self, ts: u64, update: StackUpdateResult) {
+        for frame in update.frames_closed {
+            if let Some(id) = self.lookup_frame(&frame) {
+                self.events.push(ProfileEvent {
+                    kind: "C".into(),
+                    frame: id,
+                    at: ts,
+                });
+            }
+        }
+
+        for frame in update.frames_opened {
+            if let Some(id) = self.lookup_frame(&frame) {
+                self.events.push(ProfileEvent {
+                    kind: "O".into(),
+                    frame: id,
+                    at: ts,
+                });
+            }
+        }
+    }
+
+    fn lookup_frame(&self, frame: &Frame) -> Option<u32> {
+        let key = (frame.prv, frame.addr);
+        let id = self.frame_lookup.get(&key)?;
+        Some(*id)
     }
 }
 
@@ -70,134 +101,118 @@ impl AbstractReceiver for SpeedscopeReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Event::InferrableJump | Event::TrapException | Event::TrapInterrupt => {
-                let (success, _frame_stack_size, opened_frame) =
-                    self.stack_unwinder.step_ij(entry.clone());
-                if success {
-                    self.profile_entries.push(ProfileEntry {
-                        r#type: "O".to_string(), // opening a frame
-                        frame: opened_frame.unwrap().index,
-                        at: entry.timestamp.unwrap(),
-                    });
-                }
-            }
-            Event::UninferableJump | Event::TrapReturn => {
-                let (success, _frame_stack_size, closed_frames, opened_frame) =
-                    self.stack_unwinder.step_uj(entry.clone());
-                if success {
-                    for frame in closed_frames {
-                        self.profile_entries.push(ProfileEntry {
-                            r#type: "C".to_string(), // closing a frame
-                            frame: frame.index,
-                            at: entry.timestamp.unwrap(),
-                        });
+            Entry::Instruction { .. } => {}
+            Entry::Event { timestamp, kind } => {
+                match &kind {
+                    EventKind::SyncStart { start_prv: _, start_pc: _, .. } => {
+                        self.start = timestamp;
                     }
+                    EventKind::SyncEnd { .. } => {
+                        self.end = timestamp;
+                    }
+                    _ => {}
                 }
-                if let Some(opened_frame) = opened_frame {
-                    warn!("tail call detected");
-                    self.profile_entries.push(ProfileEntry {
-                        r#type: "O".to_string(), // opening a frame
-                        frame: opened_frame.index,
-                        at: entry.timestamp.unwrap(),
-                    });
+
+                if let Some(update) = self.unwinder.step(&Entry::Event {
+                    timestamp,
+                    kind: kind.clone(),
+                }) {
+                    self.record_stack_update(timestamp, update);
                 }
-            }
-            Event::Start => {
-                // debug!("start: {}", entry.timestamp.unwrap());
-                self.start = entry.timestamp.unwrap();
-            }
-            Event::End => {
-                // debug!("end: {}", entry.timestamp.unwrap());
-                self.end = entry.timestamp.unwrap();
-            }
-            _ => {
-                // do nothing
             }
         }
     }
 
     fn _flush(&mut self) {
-        // if there's no end time, set it to the last timestamp
         if self.end == 0 {
-            self.end = self.profile_entries.last().unwrap().at;
+            if let Some(last) = self.events.last() {
+                self.end = last.at;
+            }
         }
 
-        // forcefully close all open frames
-        let closed_frames = self.stack_unwinder.flush();
-        for frame in closed_frames {
-            self.profile_entries.push(ProfileEntry {
-                r#type: "C".to_string(), // closing a frame
-                frame: frame.index,
-                at: self.end,
-            });
+        if let Some(update) = self.unwinder.flush() {
+            // close any remaining frames at self.end
+            for frame in update.frames_closed {
+                if let Some(id) = self.lookup_frame(&frame) {
+                    self.events.push(ProfileEvent {
+                        kind: "C".into(),
+                        frame: id,
+                        at: self.end,
+                    });
+                }
+            }
         }
 
-        // Write the JSON structure manually in a deterministic order
-        writeln!(self.writer, "{{").unwrap();
-        writeln!(self.writer, "  \"version\": \"0.0.1\",").unwrap();
-        writeln!(
-            self.writer,
-            "  \"$schema\": \"https://www.speedscope.app/file-format-schema.json\","
-        )
-        .unwrap();
-        writeln!(self.writer, "  \"shared\": {{").unwrap();
-        writeln!(self.writer, "    \"frames\": [").unwrap();
-
-        // Write frames in order
-        for (i, frame) in self.frames.iter().enumerate() {
-            let comma = if i < self.frames.len() - 1 { "," } else { "" };
-            writeln!(self.writer, "      {{").unwrap();
-            writeln!(
-                self.writer,
-                "        \"name\": \"{}\",",
-                frame["name"].as_str().unwrap()
-            )
-            .unwrap();
-            writeln!(
-                self.writer,
-                "        \"file\": \"{}\",",
-                frame["file"].as_str().unwrap()
-            )
-            .unwrap();
-            writeln!(
-                self.writer,
-                "        \"line\": {}",
-                frame["line"].as_u64().unwrap()
-            )
-            .unwrap();
-            writeln!(self.writer, "      }}{}", comma).unwrap();
-        }
-
-        writeln!(self.writer, "    ]").unwrap();
-        writeln!(self.writer, "  }},").unwrap();
-        writeln!(self.writer, "  \"profiles\": [").unwrap();
-        writeln!(self.writer, "    {{").unwrap();
-        writeln!(self.writer, "      \"name\": \"tacit\",").unwrap();
-        writeln!(self.writer, "      \"type\": \"evented\",").unwrap();
-        writeln!(self.writer, "      \"unit\": \"none\",").unwrap();
-        writeln!(self.writer, "      \"startValue\": {},", self.start).unwrap();
-        writeln!(self.writer, "      \"endValue\": {},", self.end).unwrap();
-        writeln!(self.writer, "      \"events\": [").unwrap();
-
-        // Write profile entries in order
-        for (i, entry) in self.profile_entries.iter().enumerate() {
-            let comma = if i < self.profile_entries.len() - 1 {
-                ","
-            } else {
-                ""
-            };
-            writeln!(self.writer, "        {{").unwrap();
-            writeln!(self.writer, "          \"type\": \"{}\",", entry.r#type).unwrap();
-            writeln!(self.writer, "          \"frame\": {},", entry.frame).unwrap();
-            writeln!(self.writer, "          \"at\": {}", entry.at).unwrap();
-            writeln!(self.writer, "        }}{}", comma).unwrap();
-        }
-
-        writeln!(self.writer, "      ]").unwrap();
-        writeln!(self.writer, "    }}").unwrap();
-        writeln!(self.writer, "  ]").unwrap();
-        writeln!(self.writer, "}}").unwrap();
+        write_speedscope(&mut self.writer, &self.frames, &self.events, self.start, self.end)
+            .expect("write speedscope");
 
         self.writer.flush().unwrap();
     }
+}
+
+/// Build Speedscope frames and an address→frame-id lookup.
+fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, HashMap<(Prv, u64), u32>) {
+    let mut frames = Vec::new();
+    let mut lookup = HashMap::new();
+
+    for prv in [Prv::PrvUser, Prv::PrvSupervisor, Prv::PrvMachine] {
+        for (&addr, info) in symbols.get(prv).iter() {
+            let id = frames.len() as u32;
+            frames.push(json!({
+                "name": info.name,
+                "file": info.src.file,
+                "line": info.src.lines,
+            }));
+            lookup.insert((prv, addr), id);
+        }
+    }
+
+    (frames, lookup)
+}
+
+fn write_speedscope(
+    writer: &mut BufWriter<File>,
+    frames: &[Value],
+    events: &[ProfileEvent],
+    start: u64,
+    end: u64,
+) -> std::io::Result<()> {
+    writeln!(writer, "{{")?;
+    writeln!(writer, "  \"version\": \"0.0.1\",")?;
+    writeln!(
+        writer,
+        "  \"$schema\": \"https://www.speedscope.app/file-format-schema.json\","
+    )?;
+    writeln!(writer, "  \"shared\": {{")?;
+    writeln!(writer, "    \"frames\": [")?;
+    for (i, frame) in frames.iter().enumerate() {
+        let comma = if i + 1 < frames.len() { "," } else { "" };
+        writeln!(writer, "      {}{}", frame.to_string(), comma)?;
+    }
+    writeln!(writer, "    ]")?;
+    writeln!(writer, "  }},")?;
+    writeln!(writer, "  \"profiles\": [")?;
+    writeln!(writer, "    {{")?;
+    writeln!(writer, "      \"name\": \"tacit\",")?;
+    writeln!(writer, "      \"type\": \"evented\",")?;
+    writeln!(writer, "      \"unit\": \"none\",")?;
+    writeln!(writer, "      \"startValue\": {},", start)?;
+    writeln!(writer, "      \"endValue\": {},", end)?;
+    writeln!(writer, "      \"events\": [")?;
+
+    for (i, ev) in events.iter().enumerate() {
+        let comma = if i + 1 < events.len() { "," } else { "" };
+        writeln!(
+            writer,
+            "        {{\"type\": \"{}\", \"frame\": {}, \"at\": {}}}{}",
+            ev.kind, ev.frame, ev.at, comma
+        )?;
+    }
+
+    writeln!(writer, "      ]")?;
+    writeln!(writer, "    }}")?;
+    writeln!(writer, "  ]")?;
+    writeln!(writer, "}}")?;
+
+    Ok(())
 }

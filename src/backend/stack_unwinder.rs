@@ -8,9 +8,9 @@ use crate::common::symbol_index::{SymbolIndex, SymbolInfo};
 
 #[derive(Clone)]
 pub struct Frame{
-    prv: Prv,
-    symbol: SymbolInfo,
-    addr: u64,
+    pub prv: Prv,
+    pub symbol: SymbolInfo,
+    pub addr: u64,
 }
 
 pub struct StackUnwinder {
@@ -25,9 +25,9 @@ pub struct StackUnwinder {
 }
 
 pub struct StackUpdateResult {
-    frame_stack_size: usize,
-    frames_opened: Vec<Frame>,
-    frames_closed: Vec<Frame>,
+    pub frame_stack_size: usize,
+    pub frames_opened: Vec<Frame>,
+    pub frames_closed: Vec<Frame>,
 }
 
 impl StackUnwinder {
@@ -58,7 +58,7 @@ impl StackUnwinder {
         })
     }
 
-    pub fn step(&mut self, entry: Entry) -> Option<StackUpdateResult> {
+    pub fn step(&mut self, entry: &Entry) -> Option<StackUpdateResult> {
         let Entry::Event {kind, ..} = entry else {return None};
         match kind {
             EventKind::SyncStart { runtime_cfg: _ , start_pc: _, start_prv } => self.step_sync_start(start_prv),
@@ -68,8 +68,8 @@ impl StackUnwinder {
         }
     }
     
-    pub fn step_sync_start(&mut self, start_prv: Prv) -> Option<StackUpdateResult> {
-        self.curr_prv = start_prv;
+    pub fn step_sync_start(&mut self, start_prv: &Prv) -> Option<StackUpdateResult> {
+        self.curr_prv = start_prv.clone();
         None
     }
 

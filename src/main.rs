@@ -288,13 +288,17 @@ fn main() -> Result<()> {
     }
 
     if to_stack_txt {
+        let to_stack_txt_symbol_index = std::sync::Arc::clone(&symbol_index);
+        let to_stack_txt_insn_index = std::sync::Arc::clone(&insn_index);
         let stack_txt_rx =
-            StackTxtReceiver::new(bus.add_rx(), static_cfg.application_binary.clone());
+            StackTxtReceiver::new(bus.add_rx(), to_stack_txt_symbol_index, to_stack_txt_insn_index);
         receivers.push(Box::new(stack_txt_rx));
     }
 
     if to_atomics {
-        let atomic_rx = AtomicReceiver::new(bus.add_rx(), static_cfg.application_binary.clone());
+        let to_atomics_symbol_index = std::sync::Arc::clone(&symbol_index);
+        let to_atomics_insn_index = std::sync::Arc::clone(&insn_index);
+        let atomic_rx = AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index, to_atomics_insn_index);
         receivers.push(Box::new(atomic_rx));
     }
 
@@ -322,9 +326,12 @@ fn main() -> Result<()> {
 
     if to_speedscope {
         let speedscope_bus_endpoint = bus.add_rx();
+        let speedscope_symbol_index = std::sync::Arc::clone(&symbol_index);
+        let speedscope_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(SpeedscopeReceiver::new(
             speedscope_bus_endpoint,
-            static_cfg.application_binary.clone(),
+            speedscope_symbol_index,
+            speedscope_insn_index,
         )));
     }
 

@@ -1,5 +1,5 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 use crate::frontend::br_mode;
 use bus::BusReader;
 use std::fs::File;
@@ -45,30 +45,27 @@ impl AbstractReceiver for StatsReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::None => {
+        match entry {
+            Entry::Event {kind, ..} => {
+                self.packet_count += 1;
+                match kind {
+                    EventKind::BPHit { hit_count } => {
+                        if self.br_mode == br_mode::BrMode::BrPredict {
+                            self.hit_count += hit_count;
+                        }
+                    }
+                    EventKind::BPMiss => {
+                        if self.br_mode == br_mode::BrMode::BrPredict {
+                            self.miss_count += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Entry::Instruction { insn: _, pc: _ } => {
                 self.insn_count += 1;
             }
-            Event::BPHit => {
-                if self.br_mode == br_mode::BrMode::BrPredict {
-                    self.packet_count += 1;
-                    self.hit_count += entry.timestamp.unwrap();
-                }
-            }
-            Event::BPMiss => {
-                if self.br_mode == br_mode::BrMode::BrPredict {
-                    self.packet_count += 1;
-                    self.miss_count += 1;
-                }
-            }
-            Event::TakenBranch | Event::NonTakenBranch => {
-                if self.br_mode != br_mode::BrMode::BrPredict {
-                    self.packet_count += 1;
-                }
-            }
-            _ => {
-                self.packet_count += 1;
-            }
+
         }
     }
 
