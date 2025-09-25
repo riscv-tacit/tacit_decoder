@@ -1,86 +1,163 @@
+use crate::common::prv::Prv;
+use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use crate::frontend::trap_type::TrapType;
 use rvdasm::insn::Insn;
 use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub enum Event {
-    None,
-    Start,
-    TakenBranch,
-    NonTakenBranch,
-    UninferableJump,
-    InferrableJump,
-    End,
-    TrapException,
-    TrapInterrupt,
-    TrapReturn,
-    BPHit,
+#[derive(Debug, Clone, Serialize)]
+pub enum Entry {
+    Instruction { insn: Insn, pc: u64 },
+    Event { timestamp: u64, kind: EventKind },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum EventKind {
+    TakenBranch {
+        arc: (u64, u64),
+    },
+    NonTakenBranch {
+        arc: (u64, u64),
+    },
+    UninferableJump {
+        arc: (u64, u64),
+    },
+    InferrableJump {
+        arc: (u64, u64),
+    },
+    Trap {
+        reason: TrapReason,
+        prv_arc: (Prv, Prv),
+    },
+    SyncStart {
+        runtime_cfg: DecoderRuntimeCfg,
+        start_pc: u64,
+        start_prv: Prv,
+    },
+    SyncEnd {
+        end_pc: u64,
+    },
+    SyncPeriodic,
+    BPHit {
+        hit_count: u64,
+    },
     BPMiss,
     Panic,
 }
 
-impl Event {
-    pub fn from_trap_type(trap_type: TrapType) -> Self {
-        match trap_type {
-            TrapType::TException => Event::TrapException,
-            TrapType::TInterrupt => Event::TrapInterrupt,
-            TrapType::TReturn => Event::TrapReturn,
-            TrapType::TNone => panic!("TNone should not be converted to Event"),
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            Event::None => "None".to_string(),
-            Event::Start => "Start".to_string(),
-            Event::TakenBranch => "TakenBranch".to_string(),
-            Event::NonTakenBranch => "NonTakenBranch".to_string(),
-            Event::UninferableJump => "UninferableJump".to_string(),
-            Event::InferrableJump => "InferrableJump".to_string(),
-            Event::End => "End".to_string(),
-            Event::TrapException => "TrapException".to_string(),
-            Event::TrapInterrupt => "TrapInterrupt".to_string(),
-            Event::TrapReturn => "TrapReturn".to_string(),
-            Event::BPHit => "BPHit".to_string(),
-            Event::BPMiss => "BPMiss".to_string(),
-            Event::Panic => "Panic".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Entry {
-    pub event: Event,
-    pub arc: (u64, u64), // from, to
-    pub insn: Option<Insn>,
-    pub timestamp: Option<u64>,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum TrapReason {
+    Exception,
+    Interrupt,
+    Return,
 }
 
 impl Entry {
-    pub fn new_timed_event(event: Event, timestamp: u64, from: u64, to: u64) -> Self {
-        Self {
-            event,
-            arc: (from, to),
-            insn: None,
-            timestamp: Some(timestamp),
+    pub fn event(event: EventKind, timestamp: u64) -> Self {
+        Entry::Event {
+            timestamp,
+            kind: event,
         }
     }
 
-    pub fn new_insn(insn: &Insn, address: u64) -> Self {
-        Self {
-            event: Event::None,
-            arc: (address, address + insn.get_len() as u64),
-            insn: Some(insn.clone()),
-            timestamp: None,
+    pub fn instruction(insn: &Insn, pc: u64) -> Self {
+        Entry::Instruction {
+            insn: insn.clone(),
+            pc,
+        }
+    }
+}
+
+impl EventKind {
+    // constructors
+    pub fn taken_branch(arc: (u64, u64)) -> Self {
+        EventKind::TakenBranch { arc }
+    }
+
+    pub fn non_taken_branch(arc: (u64, u64)) -> Self {
+        EventKind::NonTakenBranch { arc }
+    }
+
+    pub fn uninferable_jump(arc: (u64, u64)) -> Self {
+        EventKind::UninferableJump { arc }
+    }
+
+    pub fn inferrable_jump(arc: (u64, u64)) -> Self {
+        EventKind::InferrableJump { arc }
+    }
+
+    pub fn trap(reason: TrapReason, prv_arc: (Prv, Prv)) -> Self {
+        EventKind::Trap { reason, prv_arc }
+    }
+
+    pub fn sync_start(runtime_cfg: DecoderRuntimeCfg, start_pc: u64, start_prv: Prv) -> Self {
+        EventKind::SyncStart {
+            runtime_cfg,
+            start_pc,
+            start_prv,
         }
     }
 
-    pub fn new_timed_trap(trap_type: TrapType, timestamp: u64, from: u64, to: u64) -> Self {
-        Self {
-            event: Event::from_trap_type(trap_type),
-            arc: (from, to),
-            insn: None,
-            timestamp: Some(timestamp),
+    pub fn sync_end(end_pc: u64) -> Self {
+        EventKind::SyncEnd { end_pc }
+    }
+
+    pub fn sync_periodic() -> Self {
+        EventKind::SyncPeriodic
+    }
+
+    pub fn bphit(hit_count: u64) -> Self {
+        EventKind::BPHit { hit_count }
+    }
+
+    pub fn bpmiss() -> Self {
+        EventKind::BPMiss
+    }
+
+    pub fn panic() -> Self {
+        EventKind::Panic
+    }
+
+    // getters
+    pub fn get_from_addr(&self) -> Option<u64> {
+        match self {
+            EventKind::TakenBranch { arc } => Some(arc.0),
+            EventKind::UninferableJump { arc } => Some(arc.0),
+            EventKind::InferrableJump { arc } => Some(arc.0),
+            _ => None,
+        }
+    }
+
+    pub fn get_to_addr(&self) -> Option<u64> {
+        match self {
+            EventKind::TakenBranch { arc } => Some(arc.1),
+            EventKind::UninferableJump { arc } => Some(arc.1),
+            EventKind::InferrableJump { arc } => Some(arc.1),
+            _ => None,
+        }
+    }
+
+    pub fn get_trap_reason(&self) -> Option<TrapReason> {
+        match self {
+            EventKind::Trap { reason, .. } => Some(reason.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_prv_arc(&self) -> Option<(Prv, Prv)> {
+        match self {
+            EventKind::Trap { prv_arc, .. } => Some(prv_arc.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl From<TrapType> for TrapReason {
+    fn from(trap_type: TrapType) -> Self {
+        match trap_type {
+            TrapType::TException => TrapReason::Exception,
+            TrapType::TInterrupt => TrapReason::Interrupt,
+            TrapType::TReturn => TrapReason::Return,
+            TrapType::TNone => panic!("TNone should not be converted to TrapReason"),
         }
     }
 }

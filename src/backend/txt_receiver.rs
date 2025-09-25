@@ -1,5 +1,5 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 use bus::BusReader;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -32,36 +32,34 @@ impl AbstractReceiver for TxtReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::None => {
-                // only arc.0 is used for none type events
+        match entry {
+            Entry::Instruction { insn, pc } => {
                 self.writer
-                    .write_all(format!("{:#x}:", entry.arc.0).as_bytes())
+                    .write_all(format!("{:#x}:", pc).as_bytes())
                     .unwrap();
-                if let Some(insn) = entry.insn {
-                    self.writer
-                        .write_all(format!(" {}", insn.to_string()).as_bytes())
-                        .unwrap();
-                }
+                self.writer
+                    .write_all(format!(" {}", insn.to_string()).as_bytes())
+                    .unwrap();
                 self.writer.write_all(b"\n").unwrap();
             }
-            Event::BPHit => {
+            Entry::Event {
+                timestamp: _,
+                kind: EventKind::BPHit { hit_count },
+            } => {
                 self.writer
-                    .write_all(format!("[hit count: {}]", entry.timestamp.unwrap()).as_bytes())
+                    .write_all(format!("[hit count: {}]", hit_count).as_bytes())
                     .unwrap();
                 self.writer.write_all(b" BPHit\n").unwrap();
             }
-            _ => {
-                if let Some(timestamp) = entry.timestamp {
-                    self.writer
-                        .write_all(format!("[timestamp: {}]", timestamp).as_bytes())
-                        .unwrap();
-                    // write the event
-                    self.writer
-                        .write_all(format!(" {}", entry.event.to_string()).as_bytes())
-                        .unwrap();
-                    self.writer.write_all(b"|").unwrap();
-                }
+            Entry::Event { timestamp, kind } => {
+                self.writer
+                    .write_all(format!("[timestamp: {}]", timestamp).as_bytes())
+                    .unwrap();
+                // write the event
+                self.writer
+                    .write_all(format!(" {:?}", kind).as_bytes())
+                    .unwrap();
+                self.writer.write_all(b"| ").unwrap();
             }
         }
     }

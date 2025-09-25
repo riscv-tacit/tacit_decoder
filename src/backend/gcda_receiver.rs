@@ -1,11 +1,11 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 use addr2line::Loader;
 use bus::BusReader;
 use gcno_reader::cfg::{ControlFlowGraph, ReportedEdge, SourceLocation};
 use gcno_reader::reader::GCNOReader;
 use indexmap::IndexMap;
-use log::{debug, trace};
+use log::trace;
 use object::{Object, ObjectSymbol};
 use std::fs;
 use std::fs::File;
@@ -62,6 +62,27 @@ impl GcdaReceiver {
             cfg: cfg,
         }
     }
+
+    pub fn update_edge_map(&mut self, from_addr: u64, to_addr: u64) {
+        let from_source: SourceLocation =
+            SourceLocation::from_addr2line(self.loader.find_location(from_addr).unwrap());
+        let to_source: SourceLocation =
+            SourceLocation::from_addr2line(self.loader.find_location(to_addr).unwrap());
+        // match this to the edge map
+        for (_, edges) in self.edge_map.iter_mut() {
+            for edge in edges.iter_mut() {
+                if edge.from.contains(&from_source) && edge.to.contains(&to_source) {
+                    edge.increment_count();
+                }
+            }
+        }
+    }
+
+    pub fn update_func_symbol_map(&mut self, addr: u64) {
+        if let Some(edge_count) = self.func_symbol_map.get_mut(&addr) {
+            edge_count.1 += 1;
+        }
+    }
 }
 
 impl AbstractReceiver for GcdaReceiver {
@@ -74,32 +95,33 @@ impl AbstractReceiver for GcdaReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::TakenBranch
-            | Event::NonTakenBranch
-            | Event::InferrableJump
-            | Event::UninferableJump => {
-                let from_source: SourceLocation =
-                    SourceLocation::from_addr2line(self.loader.find_location(entry.arc.0).unwrap());
-                let to_source: SourceLocation =
-                    SourceLocation::from_addr2line(self.loader.find_location(entry.arc.1).unwrap());
-                // match this to the edge map
-                for (_, edges) in self.edge_map.iter_mut() {
-                    for edge in edges.iter_mut() {
-                        if edge.from.contains(&from_source) && edge.to.contains(&to_source) {
-                            edge.increment_count();
-                            // a special debug for function "FloorPowerOfTwo"
-                            if edge.func_name == "FloorPowerOfTwo" {
-                                debug!("edge count: {:?}", edge.count);
-                            }
-                        }
-                    }
-                }
+        match entry {
+            Entry::Event {
+                timestamp: _,
+                kind: EventKind::TakenBranch { arc },
+            } => {
+                self.update_edge_map(arc.0, arc.1);
             }
-            Event::None => {
-                if let Some(edge_count) = self.func_symbol_map.get_mut(&entry.arc.0) {
-                    edge_count.1 += 1;
-                }
+            Entry::Event {
+                timestamp: _,
+                kind: EventKind::NonTakenBranch { arc },
+            } => {
+                self.update_edge_map(arc.0, arc.1);
+            }
+            Entry::Event {
+                timestamp: _,
+                kind: EventKind::InferrableJump { arc },
+            } => {
+                self.update_edge_map(arc.0, arc.1);
+            }
+            Entry::Event {
+                timestamp: _,
+                kind: EventKind::UninferableJump { arc },
+            } => {
+                self.update_edge_map(arc.0, arc.1);
+            }
+            Entry::Instruction { insn: _, pc } => {
+                self.update_func_symbol_map(pc);
             }
             _ => {}
         }

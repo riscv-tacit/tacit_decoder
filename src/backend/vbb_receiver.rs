@@ -1,5 +1,5 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 
 use bus::BusReader;
 use std::collections::HashMap;
@@ -34,6 +34,24 @@ impl VBBReceiver {
             prev_timestamp: 0,
         }
     }
+
+    fn update_bb_records(&mut self, from_addr: u64, to_addr: u64, timestamp: u64) {
+        let bb = BB {
+            start_addr: self.prev_addr,
+            end_addr: from_addr,
+        };
+        if self.bb_records.contains_key(&bb) {
+            self.bb_records
+                .get_mut(&bb)
+                .unwrap()
+                .push(timestamp - self.prev_timestamp);
+        } else {
+            self.bb_records
+                .insert(bb, vec![timestamp - self.prev_timestamp]);
+        }
+        self.prev_addr = to_addr;
+        self.prev_timestamp = timestamp;
+    }
 }
 
 impl AbstractReceiver for VBBReceiver {
@@ -46,32 +64,42 @@ impl AbstractReceiver for VBBReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::Start => {
-                self.prev_addr = entry.arc.0;
-                self.prev_timestamp = entry.timestamp.unwrap();
+        match entry {
+            Entry::Event {
+                timestamp,
+                kind:
+                    EventKind::SyncStart {
+                        runtime_cfg: _,
+                        start_pc,
+                        start_prv: _,
+                    },
+            } => {
+                self.prev_addr = start_pc;
+                self.prev_timestamp = timestamp;
             }
-            Event::InferrableJump
-            | Event::UninferableJump
-            | Event::TakenBranch
-            | Event::NonTakenBranch => {
-                let curr_addr = entry.arc.0;
-                let curr_timestamp = entry.timestamp.unwrap();
-                let bb = BB {
-                    start_addr: self.prev_addr,
-                    end_addr: curr_addr,
-                };
-                if self.bb_records.contains_key(&bb) {
-                    self.bb_records
-                        .get_mut(&bb)
-                        .unwrap()
-                        .push(curr_timestamp - self.prev_timestamp);
-                } else {
-                    self.bb_records
-                        .insert(bb, vec![curr_timestamp - self.prev_timestamp]);
-                }
-                self.prev_addr = entry.arc.1;
-                self.prev_timestamp = curr_timestamp;
+            Entry::Event {
+                timestamp,
+                kind: EventKind::InferrableJump { arc },
+            } => {
+                self.update_bb_records(arc.0, arc.1, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::UninferableJump { arc },
+            } => {
+                self.update_bb_records(arc.0, arc.1, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::TakenBranch { arc },
+            } => {
+                self.update_bb_records(arc.0, arc.1, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::NonTakenBranch { arc },
+            } => {
+                self.update_bb_records(arc.0, arc.1, timestamp);
             }
             _ => {}
         }

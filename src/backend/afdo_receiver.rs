@@ -1,5 +1,5 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 use bus::BusReader;
 use std::collections::HashMap;
 use std::fs::File;
@@ -29,6 +29,18 @@ impl AfdoReceiver {
             elf_start: elf_start,
         }
     }
+
+    pub fn update_records(&mut self, from_addr: u64, to_addr: u64, timestamp: u64) {
+        self.range_map
+            .entry((self.last_record.1, to_addr))
+            .and_modify(|v| *v += 1)
+            .or_insert(1);
+        self.branch_map
+            .entry((from_addr, to_addr))
+            .and_modify(|v| *v += 1)
+            .or_insert(1);
+        self.last_record = (to_addr, timestamp);
+    }
 }
 
 impl AbstractReceiver for AfdoReceiver {
@@ -41,20 +53,35 @@ impl AbstractReceiver for AfdoReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::Start => {
-                self.last_record = (0, entry.arc.0);
+        match entry {
+            Entry::Event {
+                timestamp: _,
+                kind:
+                    EventKind::SyncStart {
+                        runtime_cfg: _,
+                        start_pc,
+                        start_prv: _,
+                    },
+            } => {
+                self.last_record = (0, start_pc);
             }
-            Event::TakenBranch | Event::InferrableJump | Event::UninferableJump => {
-                self.range_map
-                    .entry((self.last_record.1, entry.arc.0))
-                    .and_modify(|v| *v += 1)
-                    .or_insert(1);
-                self.branch_map
-                    .entry((entry.arc.0, entry.arc.1))
-                    .and_modify(|v| *v += 1)
-                    .or_insert(1);
-                self.last_record = (entry.arc.0, entry.arc.1);
+            Entry::Event {
+                timestamp,
+                kind: EventKind::TakenBranch { arc },
+            } => {
+                self.update_records(arc.0, arc.1, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::InferrableJump { arc },
+            } => {
+                self.update_records(arc.0, arc.1, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::UninferableJump { arc },
+            } => {
+                self.update_records(arc.0, arc.1, timestamp);
             }
             _ => {}
         }

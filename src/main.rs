@@ -11,12 +11,12 @@ mod frontend {
     pub mod br_mode;
     pub mod c_header;
     pub mod ctx_mode;
+    pub mod decoder;
     pub mod f_header;
     pub mod packet;
     pub mod runtime_cfg;
     pub mod sync_type;
     pub mod trap_type;
-    pub mod decoder;
 }
 
 mod backend {
@@ -24,7 +24,6 @@ mod backend {
     pub mod afdo_receiver;
     pub mod atomic_receiver;
     pub mod event;
-    pub mod foc_receiver;
     pub mod gcda_receiver;
     pub mod perfetto_receiver;
     pub mod speedscope_receiver;
@@ -39,6 +38,9 @@ mod backend {
 mod common {
     pub mod insn_index;
     pub mod prv;
+    pub mod source_location;
+    pub mod static_cfg;
+    pub mod symbol_index;
 }
 
 // file IO
@@ -59,7 +61,6 @@ use backend::abstract_receiver::AbstractReceiver;
 use backend::afdo_receiver::AfdoReceiver;
 use backend::atomic_receiver::AtomicReceiver;
 use backend::event::Entry;
-use backend::foc_receiver::FOCReceiver;
 use backend::gcda_receiver::GcdaReceiver;
 use backend::perfetto_receiver::PerfettoReceiver;
 use backend::speedscope_receiver::SpeedscopeReceiver;
@@ -68,9 +69,9 @@ use backend::stats_receiver::StatsReceiver;
 use backend::txt_receiver::TxtReceiver;
 use backend::vbb_receiver::VBBReceiver;
 use backend::vpp_receiver::VPPReceiver;
+use common::static_cfg::{load_file_config, DecoderStaticCfg};
 // error handling
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 
 const BUS_SIZE: usize = 1024;
 
@@ -140,49 +141,16 @@ struct Args {
     to_vbb: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-struct DecoderStaticCfg {
-    encoded_trace: String,
-    application_binary: String,
-    sbi_binary: String,
-    kernel_binary: String,
-    kernel_jump_label_patch_log: String,
-    driver_binary_entry_tuples: Vec<(String, String)>,
-    header_only: bool,
-    to_stats: bool,
-    to_txt: bool,
-    to_stack_txt: bool,
-    to_atomics: bool,
-    to_afdo: bool,
-    gcno: String,
-    to_gcda: bool,
-    to_speedscope: bool,
-    to_perfetto: bool,
-    to_vpp: bool,
-    to_foc: bool,
-    to_vbb: bool,
-}
-
-fn load_file_config(path: &str) -> Result<DecoderStaticCfg> {
-    let f = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(f);
-    let cfg: DecoderStaticCfg = serde_json::from_reader(reader)?;
-    Ok(cfg)
-}
-
-
 fn main() -> Result<()> {
     env_logger::init();
     let args = Args::parse();
 
     // If a config file is supplied, use it for receiver toggles (CLI still supplies paths).
-    let file_cfg= if let Some(path) = &args.config {
+    let file_cfg = if let Some(path) = &args.config {
         load_file_config(path)?
     } else {
         DecoderStaticCfg::default()
     };
-
 
     fn pick_arg<T: Clone>(cli: Option<T>, file: T) -> T {
         cli.unwrap_or(file)
@@ -206,31 +174,68 @@ fn main() -> Result<()> {
     let to_speedscope = pick_arg(args.to_speedscope, file_cfg.to_speedscope);
     let to_perfetto = pick_arg(args.to_perfetto, file_cfg.to_perfetto);
     let to_vpp = pick_arg(args.to_vpp, file_cfg.to_vpp);
-    let to_foc = pick_arg(args.to_foc, file_cfg.to_foc);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
-    let static_cfg = DecoderStaticCfg { encoded_trace, application_binary, kernel_binary, kernel_jump_label_patch_log, driver_binary_entry_tuples, sbi_binary, header_only, to_stats, to_txt, to_stack_txt, to_atomics, to_afdo, gcno: gcno_path.clone(), to_gcda, to_speedscope, to_perfetto, to_vpp, to_foc, to_vbb };
+    let static_cfg = DecoderStaticCfg {
+        encoded_trace,
+        application_binary,
+        kernel_binary,
+        kernel_jump_label_patch_log,
+        driver_binary_entry_tuples,
+        sbi_binary,
+        header_only,
+        to_stats,
+        to_txt,
+        to_stack_txt,
+        to_atomics,
+        to_afdo,
+        gcno: gcno_path.clone(),
+        to_gcda,
+        to_speedscope,
+        to_perfetto,
+        to_vpp,
+        to_vbb,
+    };
 
     // verify the binary exists and is a file
-    if !Path::new(&static_cfg.application_binary).exists() || !Path::new(&static_cfg.application_binary).is_file() {
-        return Err(anyhow::anyhow!("Application binary file is not valid: {}", static_cfg.application_binary));
+    if !Path::new(&static_cfg.application_binary).exists()
+        || !Path::new(&static_cfg.application_binary).is_file()
+    {
+        return Err(anyhow::anyhow!(
+            "Application binary file is not valid: {}",
+            static_cfg.application_binary
+        ));
     }
-    if static_cfg.sbi_binary != "" && !Path::new(&static_cfg.sbi_binary).exists() || !Path::new(&static_cfg.sbi_binary).is_file() {
-        return Err(anyhow::anyhow!("SBI binary file is not valid: {}", static_cfg.sbi_binary));
+    if static_cfg.sbi_binary != "" && !Path::new(&static_cfg.sbi_binary).exists()
+        || !Path::new(&static_cfg.sbi_binary).is_file()
+    {
+        return Err(anyhow::anyhow!(
+            "SBI binary file is not valid: {}",
+            static_cfg.sbi_binary
+        ));
     }
-    if static_cfg.kernel_binary != "" && !Path::new(&static_cfg.kernel_binary).exists() || !Path::new(&static_cfg.kernel_binary).is_file() {
-        return Err(anyhow::anyhow!("Kernel binary file is not valid: {}", static_cfg.kernel_binary));
+    if static_cfg.kernel_binary != "" && !Path::new(&static_cfg.kernel_binary).exists()
+        || !Path::new(&static_cfg.kernel_binary).is_file()
+    {
+        return Err(anyhow::anyhow!(
+            "Kernel binary file is not valid: {}",
+            static_cfg.kernel_binary
+        ));
     }
 
     // verify the encoded trace exists and is a file
-    if !Path::new(&static_cfg.encoded_trace).exists() || !Path::new(&static_cfg.encoded_trace).is_file() {
-        return Err(anyhow::anyhow!("Encoded trace file is not valid: {}", static_cfg.encoded_trace));
+    if !Path::new(&static_cfg.encoded_trace).exists()
+        || !Path::new(&static_cfg.encoded_trace).is_file()
+    {
+        return Err(anyhow::anyhow!(
+            "Encoded trace file is not valid: {}",
+            static_cfg.encoded_trace
+        ));
     }
 
     if let Some(path) = &args.dump_effective_config {
         let mut f = std::fs::File::create(path)?;
         serde_json::to_writer_pretty(&mut f, &static_cfg)?;
     }
-
 
     let (first_packet, runtime_cfg) = {
         let trace_file = File::open(static_cfg.encoded_trace.clone())?;
@@ -249,15 +254,14 @@ fn main() -> Result<()> {
         std::process::exit(0);
     }
 
-    // Build instruction index once (for frontend; can be shared to backends later)
-    let insn_index = common::insn_index::build_instruction_index(
-        &static_cfg.application_binary,
-        &static_cfg.kernel_binary,
-        &static_cfg.sbi_binary,
-        &static_cfg.kernel_jump_label_patch_log,
-        &static_cfg.driver_binary_entry_tuples,
-    )?;
+    // Build instruction index once
+    // Notice that this operation is very slow for large binaries
+    let insn_index = common::insn_index::build_instruction_index(static_cfg.clone())?;
     let insn_index = std::sync::Arc::new(insn_index);
+
+    // Build symbol index once
+    let symbol_index = common::symbol_index::build_symbol_index(static_cfg.clone())?;
+    let symbol_index = std::sync::Arc::new(symbol_index);
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
@@ -284,7 +288,8 @@ fn main() -> Result<()> {
     }
 
     if to_stack_txt {
-        let stack_txt_rx = StackTxtReceiver::new(bus.add_rx(), static_cfg.application_binary.clone());
+        let stack_txt_rx =
+            StackTxtReceiver::new(bus.add_rx(), static_cfg.application_binary.clone());
         receivers.push(Box::new(stack_txt_rx));
     }
 
@@ -337,14 +342,6 @@ fn main() -> Result<()> {
             vpp_bus_endpoint,
             static_cfg.application_binary.clone(),
             runtime_cfg.br_mode == BrMode::BrTarget,
-        )));
-    }
-
-    if to_foc {
-        let foc_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(FOCReceiver::new(
-            foc_bus_endpoint,
-            static_cfg.application_binary.clone(),
         )));
     }
 

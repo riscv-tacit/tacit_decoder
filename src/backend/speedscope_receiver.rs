@@ -1,5 +1,5 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::StackUnwinder;
 
 use bus::BusReader;
@@ -69,7 +69,7 @@ impl AbstractReceiver for SpeedscopeReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
+        match entry {
             Event::InferrableJump | Event::TrapException | Event::TrapInterrupt => {
                 let (success, _frame_stack_size, opened_frame) =
                     self.stack_unwinder.step_ij(entry.clone());

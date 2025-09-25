@@ -1,287 +1,144 @@
-use indexmap::IndexMap;
-use std::collections::HashMap;
-
-// objdump dependency
-use object::elf::SHF_EXECINSTR;
-use object::{Object, ObjectSection, ObjectSymbol, SectionFlags};
-use rvdasm::disassembler::*;
-use rvdasm::insn::*;
-
-use gcno_reader::cfg::SourceLocation;
-use std::fs::File;
-use std::io::Read;
-
-use addr2line::Loader;
-use std::fs;
-
 use anyhow::Result;
-use log::{debug, trace, warn};
+use std::sync::Arc;
 
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
+use crate::common::insn_index::InstructionIndex;
+use crate::common::prv::Prv;
+use crate::common::symbol_index::{SymbolIndex, SymbolInfo};
 
-// everything you need to know about a symbol
 #[derive(Clone)]
-pub struct SymbolInfo {
-    pub name: String,
-    pub index: u32,
-    pub line: u32,
-    pub file: String,
+pub struct Frame{
+    prv: Prv,
+    symbol: SymbolInfo,
+    addr: u64,
 }
 
 pub struct StackUnwinder {
     // addr -> symbol info <name, index, line, file>
-    pub func_symbol_map: IndexMap<u64, SymbolInfo>,
-    // index -> addr range
-    pub idx_2_addr_range: IndexMap<u32, (u64, u64)>,
+    pub func_symbol_map: Arc<SymbolIndex>,
     // addr -> insn
-    pub insn_map: HashMap<u64, Insn>,
+    pub insn_map: Arc<InstructionIndex>,
     // stack model
-    pub frame_stack: Vec<u32>, // Queue of index
+    pub frame_stack: Vec<Frame>,
+    // current privilege level
+    pub curr_prv: Prv,
+}
+
+pub struct StackUpdateResult {
+    frame_stack_size: usize,
+    frames_opened: Vec<Frame>,
+    frames_closed: Vec<Frame>,
 }
 
 impl StackUnwinder {
-    pub fn new(elf_path: String) -> Result<Self> {
-        // create insn_map
-        let mut elf_file = File::open(elf_path.clone())?;
-        let mut elf_buffer = Vec::new();
-        elf_file.read_to_end(&mut elf_buffer)?;
-        let elf = object::File::parse(&*elf_buffer)?;
-        let elf_arch = elf.architecture();
-
-        let xlen = if elf_arch == object::Architecture::Riscv64 {
-            Xlen::XLEN64
-        } else if elf_arch == object::Architecture::Riscv32 {
-            Xlen::XLEN32
-        } else {
-            panic!("Unsupported architecture: {:?}", elf_arch);
-        };
-
-        let das = Disassembler::new(xlen);
-
-        let mut insn_map = HashMap::new();
-        for section in elf.sections() {
-            if let object::SectionFlags::Elf { sh_flags } = section.flags() {
-                if sh_flags & (SHF_EXECINSTR as u64) != 0 {
-                    let addr = section.address();
-                    let data = section.data()?;
-                    let sec_map = das.disassemble_all(&data, addr);
-                    debug!(
-                        "section `{}` @ {:#x}: {} insns",
-                        section.name().unwrap_or("<unnamed>"),
-                        addr,
-                        sec_map.len()
-                    );
-                    insn_map.extend(sec_map);
-                }
-            }
-        }
-        if insn_map.is_empty() {
-            return Err(anyhow::anyhow!(
-                "No executable instructions found in ELF file"
-            ));
-        }
-        trace!("[StackUnwinder::new] found {} instructions", insn_map.len());
-
-        // Re‑open ELF for symbol processing
-        let elf_data = fs::read(&elf_path)?;
-        let obj_file = object::File::parse(&*elf_data)?;
-        let loader = Loader::new(&elf_path).map_err(|e| anyhow::Error::msg(e.to_string()))?;
-
-        // Gather indices of all executable sections
-        let exec_secs: std::collections::HashSet<_> = obj_file
-            .sections()
-            .filter_map(|sec| {
-                if let SectionFlags::Elf { sh_flags } = sec.flags() {
-                    if sh_flags & (SHF_EXECINSTR as u64) != 0 {
-                        return Some(sec.index());
-                    }
-                }
-                None
-            })
-            .collect();
-
-        // Build func_symbol_map from _all_ symbols in executable sections
-        let mut func_symbol_map: IndexMap<u64, SymbolInfo> = IndexMap::new();
-        let mut next_index = 0;
-        for symbol in obj_file.symbols() {
-            // only symbols tied to an exec section
-            if let Some(sec_idx) = symbol.section_index() {
-                if exec_secs.contains(&sec_idx) {
-                    if let Ok(name) = symbol.name() {
-                        if !name.starts_with("$x") {
-                            let addr = symbol.address();
-                            // lookup source location (may return None)
-                            if let Ok(Some(loc)) = loader.find_location(addr) {
-                                let src: SourceLocation = SourceLocation::from_addr2line(Some(loc));
-                                let info = SymbolInfo {
-                                    name: name.to_string(),
-                                    index: next_index,
-                                    line: src.lines,
-                                    file: src.file.to_string(),
-                                };
-                                // dedupe aliases: prefer non‑empty over empty
-                                if let Some(existing) = func_symbol_map.get_mut(&addr) {
-                                    if existing.name.trim().is_empty()
-                                        && !info.name.trim().is_empty()
-                                    {
-                                        *existing = info;
-                                    } else {
-                                        warn!(
-                                            "func_addr 0x{:x} already in map as `{}`, ignoring alias `{}`",
-                                            addr, existing.name, info.name
-                                        );
-                                    }
-                                } else {
-                                    func_symbol_map.insert(addr, info);
-                                    next_index += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // print the size of the func_symbol_map
-        debug!("func_symbol_map size: {}", func_symbol_map.len());
-
-        // sort the func_symbol_map by address
-        let mut func_symbol_addr_sorted = func_symbol_map.keys().cloned().collect::<Vec<u64>>();
-        func_symbol_addr_sorted.sort();
-
-        // create the idx_2_addr_range map
-        let mut idx_2_addr_range = IndexMap::new();
-        for (addr, func_info) in func_symbol_map.iter() {
-            let curr_position = func_symbol_addr_sorted
-                .iter()
-                .position(|&x| x == *addr)
-                .unwrap();
-            let next_position = if curr_position == func_symbol_addr_sorted.len() - 1 {
-                0
-            } else {
-                curr_position + 1
-            };
-            let next_addr = func_symbol_addr_sorted[next_position];
-            idx_2_addr_range.insert(func_info.index, (addr.clone(), next_addr.clone()));
-        }
+    pub fn new(func_symbol_map: Arc<SymbolIndex>, insn_index: Arc<InstructionIndex>) -> Result<Self> {
 
         Ok(Self {
             func_symbol_map: func_symbol_map,
-            idx_2_addr_range: idx_2_addr_range,
-            insn_map: insn_map,
+            insn_map: insn_index,
             frame_stack: Vec::new(),
+            curr_prv: Prv::PrvMachine,
         })
     }
 
-    pub fn func_symbol_map(&self) -> &IndexMap<u64, SymbolInfo> {
-        &self.func_symbol_map
+    fn push_frame(&mut self, prv: Prv, addr: u64) -> Option<Frame> {
+        let symbol = self
+            .func_symbol_map
+            .get(prv)
+            .get(&addr)
+            .cloned()?;
+        let frame = Frame { prv, symbol, addr };
+        self.frame_stack.push(frame.clone());
+        Some(frame)
     }
 
-    // return (success, frame_stack_size, symbol_info)
-    pub fn step_ij(&mut self, entry: Entry) -> (bool, usize, Option<SymbolInfo>) {
-        assert!(
-            entry.event == Event::InferrableJump
-                || entry.event == Event::TrapException
-                || entry.event == Event::TrapInterrupt
-        );
+    fn pop_frame(&mut self) -> Option<Frame> {
+        self.frame_stack.pop().map(|frame| {
+            frame
+        })
+    }
 
-        if self.func_symbol_map.contains_key(&entry.arc.1) {
-            let frame_idx = self.func_symbol_map[&entry.arc.1].index;
-            self.frame_stack.push(frame_idx);
-            return (
-                true,
-                self.frame_stack.len(),
-                Some(self.func_symbol_map[&entry.arc.1].clone()),
+    pub fn step(&mut self, entry: Entry) -> Option<StackUpdateResult> {
+        let Entry::Event {kind, ..} = entry else {return None};
+        match kind {
+            EventKind::SyncStart { runtime_cfg: _ , start_pc: _, start_prv } => self.step_sync_start(start_prv),
+            EventKind::InferrableJump { arc } => self.step_ij(arc.1),
+            EventKind::UninferableJump { arc } => self.step_uj(arc.1),
+            _ => return None,
+        }
+    }
+    
+    pub fn step_sync_start(&mut self, start_prv: Prv) -> Option<StackUpdateResult> {
+        self.curr_prv = start_prv;
+        None
+    }
+
+    pub fn step_ij(&mut self, to_addr: u64) -> Option<StackUpdateResult> {
+        let frame = self.push_frame(self.curr_prv, to_addr);
+        if let Some(frame) = frame {
+            return Some(
+                StackUpdateResult {
+                    frame_stack_size: self.frame_stack.len(),
+                    frames_opened: vec![frame],
+                    frames_closed: Vec::new(),
+                }
             );
         } else {
-            // warn!("step_ij: func_symbol_map does not contain the jump address: {:#x}", entry.arc.1);
-            return (false, self.frame_stack.len(), None);
+            return None;
         }
     }
 
-    pub fn step_uj(&mut self, entry: Entry) -> (bool, usize, Vec<SymbolInfo>, Option<SymbolInfo>) {
-        assert!(entry.event == Event::UninferableJump || entry.event == Event::TrapReturn);
-
-        // Address of the branch instruction (the "previous insn")
-        let prev_insn = self
-            .insn_map
-            .get(&entry.arc.0)
-            .expect("missing insn in map");
-        let target = entry.arc.1;
-        let mut closed = Vec::new();
-
-        // 1) mret: always pop exactly one frame
-        if entry.event == Event::TrapReturn {
-            if let Some(idx) = self.frame_stack.pop() {
-                let start = self.idx_2_addr_range[&idx].0;
-                let sym = self.func_symbol_map[&start].clone();
-                return (true, self.frame_stack.len(), vec![sym], None);
-            } else {
-                // nothing to pop
-                return (false, 0, Vec::new(), None);
-            }
-        }
-
-        // If we see a CALL (indirect), push the new function
-        let is_call = prev_insn.is_indirect_jump() && self.func_symbol_map.get(&target).is_some();
+    pub fn step_uj(&mut self, to_addr: u64) -> Option<StackUpdateResult> {
+        let target = to_addr;
+        // If we see an indirect call, push the new function
+        let is_call = self.func_symbol_map.get(self.curr_prv).contains_key(&target);
         if is_call {
-            let info = self.func_symbol_map.get(&target).unwrap().clone();
-            self.frame_stack.push(info.index);
-            return (true, self.frame_stack.len(), Vec::new(), Some(info));
+            let frame: Frame = Frame{ prv: self.curr_prv, symbol: self.func_symbol_map.get(self.curr_prv)[&target].clone(), addr: target };
+            self.frame_stack.push(frame.clone());
+            return Some(
+                StackUpdateResult {
+                    frame_stack_size: self.frame_stack.len(),
+                    frames_opened: vec![frame],
+                    frames_closed: Vec::new(),
+                }
+            );
         }
 
-        // Otherwise, if it's an indirect jump *and* we still have frames,
+        // Otherwise, if it's an indirect jump and we still have frames,
         //    treat it like a return within the unwinding loop.
-        if prev_insn.is_indirect_jump() && !self.frame_stack.is_empty() {
-            loop {
-                let &idx = self.frame_stack.last().unwrap();
-                let (start, end) = self.idx_2_addr_range[&idx];
-                // still inside the same function?
-                if target >= start && target < end {
-                    return (true, self.frame_stack.len(), closed, None);
+        let mut closed: Vec<Frame> = Vec::new();
+        loop {
+            let frame = self.pop_frame();
+            if let Some(frame) = frame {
+                closed.push(frame.clone());
+                let (start, end) = self.func_symbol_map.range(self.curr_prv, frame.addr).expect("missing symbol in map");
+                if start <= target && end > target {
+                    return Some(
+                        StackUpdateResult {
+                            frame_stack_size: self.frame_stack.len(),
+                            frames_opened: Vec::new(),
+                            frames_closed: closed,
+                        }
+                    );
                 }
-                // else pop one more
-                let popped = self.frame_stack.pop().unwrap();
-                let func_start = self.idx_2_addr_range[&popped].0;
-                closed.push(self.func_symbol_map[&func_start].clone());
-
-                if self.frame_stack.is_empty() {
-                    // maybe it was a tail‐call
-                    if let Some(info) = self.func_symbol_map.get(&target) {
-                        self.frame_stack.push(info.index);
-                        return (true, self.frame_stack.len(), closed, Some(info.clone()));
-                    } else {
-                        return (true, 0, closed, None);
-                    }
-                }
+            } else {
+                return None;
             }
         }
-
-        // Not a call, not a return: nothing changes.
-        (false, self.frame_stack.len(), Vec::new(), None)
     }
 
-    pub fn flush(&mut self) -> Vec<SymbolInfo> {
-        let mut closed_frames = Vec::new();
-        while let Some(frame_idx) = self.frame_stack.pop() {
-            trace!("closing frame while flushing: {}", frame_idx);
-            closed_frames.push(self.func_symbol_map[&self.idx_2_addr_range[&frame_idx].0].clone());
-        }
-        closed_frames
+    pub fn flush(&mut self) -> Option<StackUpdateResult> {
+        // just return the frames
+        return Some(
+            StackUpdateResult {
+                frame_stack_size: self.frame_stack.len(),
+                frames_opened: Vec::new(),
+                frames_closed: self.frame_stack.clone(),
+            }
+        );
     }
 
-    pub fn get_symbol_info(&self, addr: u64) -> SymbolInfo {
-        self.func_symbol_map[&addr].clone()
-    }
-
-    pub fn current_frame_addrs(&self) -> Vec<u64> {
-        self.frame_stack
-            .iter()
-            .map(|idx| {
-                // look up the (start, end) tuple for this frame index
-                let (start, _end) = self.idx_2_addr_range[idx];
-                start
-            })
-            .collect()
+    pub fn peak_curr_frames(&self) -> Vec<Frame> {
+        self.frame_stack.clone()
     }
 }
