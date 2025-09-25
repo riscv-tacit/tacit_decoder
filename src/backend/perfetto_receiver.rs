@@ -1,28 +1,33 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
-use crate::backend::stack_unwinder::StackUnwinder;
+use crate::backend::event::{Entry, EventKind};
+use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
+use crate::common::insn_index::InstructionIndex;
+use crate::common::symbol_index::SymbolIndex;
+
 use bus::BusReader;
-use log::debug;
 use serde_json::json;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::sync::Arc;
 
-/// A Chrome Tracing (Perfetto) JSON receiver for RISC‑V trace decoding,
-/// but using the unwinder’s stack as the ground truth.
+/// Emit a Perfetto/Chrome trace by following the unwinder's stack updates.
 pub struct PerfettoReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
     unwinder: StackUnwinder,
     events: Vec<String>,
-    start_ts: u64,
-    end_ts: u64,
-    last_frames: Vec<u64>, // addresses of frame starts we saw last
+    start_ts: Option<u64>,
+    end_ts: Option<u64>,
+    last_ts: u64,
 }
 
 impl PerfettoReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, elf_path: String) -> Self {
-        debug!("PerfettoReceiver::new");
-        let unwinder = StackUnwinder::new(elf_path).unwrap();
+    pub fn new(
+        bus_rx: BusReader<Entry>,
+        symbols: Arc<SymbolIndex>,
+        insns: Arc<InstructionIndex>,
+    ) -> Self {
+        let unwinder = StackUnwinder::new(symbols, insns).expect("stack unwinder");
         PerfettoReceiver {
             writer: BufWriter::new(File::create("trace.perfetto.json").unwrap()),
             receiver: BusReceiver {
@@ -32,53 +37,69 @@ impl PerfettoReceiver {
             },
             unwinder,
             events: Vec::new(),
-            start_ts: 0,
-            end_ts: 0,
-            last_frames: Vec::new(),
+            start_ts: None,
+            end_ts: None,
+            last_ts: 0,
         }
     }
 
-    /// Diff last_frames vs the unwinder’s current_frame_addrs, and
-    /// emit E- and B- events to catch up.
-    fn diff_stack(&mut self, ts: u64) {
-        let new_frames = self.unwinder.current_frame_addrs();
-        // find common prefix
-        let mut i = 0;
-        while i < self.last_frames.len()
-            && i < new_frames.len()
-            && self.last_frames[i] == new_frames[i]
-        {
-            i += 1;
+    fn drain_update(&mut self, ts: u64, update: StackUpdateResult) {
+        for frame in update.frames_closed {
+            self.emit_end(ts, &frame);
         }
-        // pop any old frames beyond i
-        for &addr in self.last_frames[i..].iter().rev() {
-            let sym = self.unwinder.get_symbol_info(addr);
-            let evt = json!({
-                "name": sym.name,
-                "cat": "function",
-                "ph": "E",    // end
-                "ts": ts,
-                "pid": 0,
-                "tid": 0,
-                "args": {}
-            });
-            self.events.push(evt.to_string());
+        for frame in update.frames_opened {
+            self.emit_begin(ts, &frame);
         }
-        // push any new frames beyond i
-        for &addr in &new_frames[i..] {
-            let sym = self.unwinder.get_symbol_info(addr);
-            let evt = json!({
-                "name": sym.name,
-                "cat": "function",
-                "ph": "B",   // begin
-                "ts": ts,
-                "pid": 0,
-                "tid": 0,
-                "args": { "addr": format!("0x{:x}", addr) }
-            });
-            self.events.push(evt.to_string());
+    }
+
+    fn emit_begin(&mut self, ts: u64, frame: &Frame) {
+        let evt = json!({
+            "name": frame.symbol.name,
+            "cat": "function",
+            "ph": "B",
+            "ts": ts,
+            "pid": 0,
+            "tid": 0,
+            "args": {
+                "addr": format!("0x{:x}", frame.addr),
+                "prv": format!("{:?}", frame.prv),
+                "file": frame.symbol.src.file,
+                "line": frame.symbol.src.lines,
+            }
+        });
+        self.events.push(evt.to_string());
+    }
+
+    fn emit_end(&mut self, ts: u64, frame: &Frame) {
+        let evt = json!({
+            "name": frame.symbol.name,
+            "cat": "function",
+            "ph": "E",
+            "ts": ts,
+            "pid": 0,
+            "tid": 0,
+            "args": {}
+        });
+        self.events.push(evt.to_string());
+    }
+
+    fn maybe_record_sync_markers(&mut self, ts: u64, kind: &EventKind) {
+        match kind {
+            EventKind::SyncStart { .. } => {
+                self.start_ts.get_or_insert(ts);
+            }
+            EventKind::SyncEnd { .. } => {
+                self.end_ts = Some(ts);
+            }
+            _ => {}
         }
-        self.last_frames = new_frames;
+    }
+
+    fn close_remaining_frames(&mut self, ts: u64) {
+        if let Some(update) = self.unwinder.flush() {
+            // flush() returns the currently open frames as closed ones.
+            self.drain_update(ts, update);
+        }
     }
 }
 
@@ -92,45 +113,33 @@ impl AbstractReceiver for PerfettoReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        let ts = entry.timestamp.unwrap_or(0);
-        match entry.event {
-            Event::Start => {
-                self.start_ts = ts;
-            }
-            Event::End => {
-                self.end_ts = ts;
-            }
-            Event::InferrableJump
-            | Event::TrapException
-            | Event::TrapInterrupt
-            | Event::UninferableJump
-            | Event::TrapReturn => {
-                // feed the unwinder
-                if entry.event == Event::InferrableJump
-                    || entry.event == Event::TrapException
-                    || entry.event == Event::TrapInterrupt
-                {
-                    let _ = self.unwinder.step_ij(entry.clone());
-                } else {
-                    let _ = self.unwinder.step_uj(entry.clone());
+        match entry {
+            Entry::Instruction { .. } => {}
+            Entry::Event { timestamp, kind } => {
+                self.last_ts = timestamp;
+                self.maybe_record_sync_markers(timestamp, &kind);
+                let event_entry = Entry::Event {
+                    timestamp,
+                    kind: kind.clone(),
+                };
+                if let Some(update) = self.unwinder.step(&event_entry) {
+                    self.drain_update(timestamp, update);
                 }
-                // now diff and emit the proper B/E events
-                self.diff_stack(ts);
             }
-            _ => {}
         }
     }
 
     fn _flush(&mut self) {
-        if self.end_ts == 0 {
-            self.end_ts = self.start_ts;
+        let final_ts = self.end_ts.or(self.start_ts).unwrap_or(self.last_ts);
+        self.close_remaining_frames(final_ts);
+
+        if self.end_ts.is_none() {
+            self.end_ts = Some(final_ts);
+        }
+        if self.start_ts.is_none() {
+            self.start_ts = Some(final_ts);
         }
 
-        // finally close any remaining frames
-        // we simply treat this like ts = end_ts
-        self.diff_stack(self.end_ts);
-
-        // write out the combined traceEvents
         writeln!(self.writer, "{{").unwrap();
         writeln!(self.writer, "  \"traceEvents\": [").unwrap();
         for (i, ev) in self.events.iter().enumerate() {
@@ -138,7 +147,7 @@ impl AbstractReceiver for PerfettoReceiver {
             writeln!(self.writer, "    {}{}", ev, comma).unwrap();
         }
         writeln!(self.writer, "  ]").unwrap();
-        writeln!(self.writer, "}}\n").unwrap();
+        writeln!(self.writer, "}}").unwrap();
         self.writer.flush().unwrap();
     }
 }

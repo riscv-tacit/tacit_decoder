@@ -17,7 +17,6 @@
   "to_gcda": false,
   "to_speedscope": false,
   "to_perfetto": false,
-  "to_vpp": false,
   "to_foc": false,
   "to_vbb": false
 }

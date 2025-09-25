@@ -40,8 +40,8 @@ impl SpeedscopeReceiver {
     ) -> Self {
         debug!("SpeedscopeReceiver::new");
 
-        let unwinder = StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns))
-            .expect("stack unwinder");
+        let unwinder =
+            StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns)).expect("stack unwinder");
 
         let (frames, frame_lookup) = build_frames(&symbols);
 
@@ -104,7 +104,11 @@ impl AbstractReceiver for SpeedscopeReceiver {
             Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
                 match &kind {
-                    EventKind::SyncStart { start_prv: _, start_pc: _, .. } => {
+                    EventKind::SyncStart {
+                        start_prv: _,
+                        start_pc: _,
+                        ..
+                    } => {
                         self.start = timestamp;
                     }
                     EventKind::SyncEnd { .. } => {
@@ -143,8 +147,14 @@ impl AbstractReceiver for SpeedscopeReceiver {
             }
         }
 
-        write_speedscope(&mut self.writer, &self.frames, &self.events, self.start, self.end)
-            .expect("write speedscope");
+        write_speedscope(
+            &mut self.writer,
+            &self.frames,
+            &self.events,
+            self.start,
+            self.end,
+        )
+        .expect("write speedscope");
 
         self.writer.flush().unwrap();
     }

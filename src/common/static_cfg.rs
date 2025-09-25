@@ -20,7 +20,6 @@ pub struct DecoderStaticCfg {
     pub to_gcda: bool,
     pub to_speedscope: bool,
     pub to_perfetto: bool,
-    pub to_vpp: bool,
     pub to_vbb: bool,
 }
 

@@ -52,26 +52,23 @@ impl StackTxtReceiver {
                 self.writer,
                 "[ts {ts}] pop {:?} :: {} @ 0x{:x}",
                 frame.prv, frame.symbol.name, frame.addr
-            ).unwrap();
+            )
+            .unwrap();
         }
-    
+
         for frame in update.frames_opened {
             writeln!(
                 self.writer,
                 "[ts {ts}] push {:?} :: {} @ 0x{:x}",
                 frame.prv, frame.symbol.name, frame.addr
-            ).unwrap();
+            )
+            .unwrap();
         }
-    
-        writeln!(
-            self.writer,
-            "  depth={}",
-            update.frame_stack_size
-        ).unwrap();
-    
+
+        writeln!(self.writer, "  depth={}", update.frame_stack_size).unwrap();
+
         self.dump_current_stack().unwrap();
     }
-    
 }
 
 impl AbstractReceiver for StackTxtReceiver {
@@ -89,7 +86,7 @@ impl AbstractReceiver for StackTxtReceiver {
             Entry::Event { timestamp, kind } => {
                 if let Some(update) = self.unwinder.step(&Entry::Event { timestamp, kind }) {
                     self.handle_stack_update(timestamp, update);
-                } 
+                }
             }
         }
     }

@@ -32,7 +32,6 @@ mod backend {
     pub mod stats_receiver;
     pub mod txt_receiver;
     pub mod vbb_receiver;
-    pub mod vpp_receiver;
 }
 
 mod common {
@@ -54,8 +53,6 @@ use std::path::Path;
 // bus dependency
 use bus::Bus;
 use std::thread;
-// frontend dependency
-use frontend::br_mode::BrMode;
 // backend dependency
 use backend::abstract_receiver::AbstractReceiver;
 use backend::afdo_receiver::AfdoReceiver;
@@ -68,7 +65,6 @@ use backend::stack_txt_receiver::StackTxtReceiver;
 use backend::stats_receiver::StatsReceiver;
 use backend::txt_receiver::TxtReceiver;
 use backend::vbb_receiver::VBBReceiver;
-use backend::vpp_receiver::VPPReceiver;
 use common::static_cfg::{load_file_config, DecoderStaticCfg};
 // error handling
 use anyhow::Result;
@@ -130,9 +126,6 @@ struct Args {
     // output the decoded trace in perfetto format
     #[arg(long)]
     to_perfetto: Option<bool>,
-    // output the decoded trace in vpp format
-    #[arg(long)]
-    to_vpp: Option<bool>,
     // output the decoded trace in foc format
     #[arg(long)]
     to_foc: Option<bool>,
@@ -173,7 +166,6 @@ fn main() -> Result<()> {
     let to_gcda = pick_arg(args.to_gcda, file_cfg.to_gcda);
     let to_speedscope = pick_arg(args.to_speedscope, file_cfg.to_speedscope);
     let to_perfetto = pick_arg(args.to_perfetto, file_cfg.to_perfetto);
-    let to_vpp = pick_arg(args.to_vpp, file_cfg.to_vpp);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
     let static_cfg = DecoderStaticCfg {
         encoded_trace,
@@ -192,7 +184,6 @@ fn main() -> Result<()> {
         to_gcda,
         to_speedscope,
         to_perfetto,
-        to_vpp,
         to_vbb,
     };
 
@@ -276,7 +267,7 @@ fn main() -> Result<()> {
         let stats_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(StatsReceiver::new(
             stats_bus_endpoint,
-            runtime_cfg.br_mode,
+            runtime_cfg.clone(),
             file_size,
         )));
     }
@@ -290,15 +281,19 @@ fn main() -> Result<()> {
     if to_stack_txt {
         let to_stack_txt_symbol_index = std::sync::Arc::clone(&symbol_index);
         let to_stack_txt_insn_index = std::sync::Arc::clone(&insn_index);
-        let stack_txt_rx =
-            StackTxtReceiver::new(bus.add_rx(), to_stack_txt_symbol_index, to_stack_txt_insn_index);
+        let stack_txt_rx = StackTxtReceiver::new(
+            bus.add_rx(),
+            to_stack_txt_symbol_index,
+            to_stack_txt_insn_index,
+        );
         receivers.push(Box::new(stack_txt_rx));
     }
 
     if to_atomics {
         let to_atomics_symbol_index = std::sync::Arc::clone(&symbol_index);
         let to_atomics_insn_index = std::sync::Arc::clone(&insn_index);
-        let atomic_rx = AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index, to_atomics_insn_index);
+        let atomic_rx =
+            AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index, to_atomics_insn_index);
         receivers.push(Box::new(atomic_rx));
     }
 
@@ -337,18 +332,12 @@ fn main() -> Result<()> {
 
     if to_perfetto {
         let perfetto_bus_endpoint = bus.add_rx();
+        let perfetto_symbol_index = std::sync::Arc::clone(&symbol_index);
+        let perfetto_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(PerfettoReceiver::new(
             perfetto_bus_endpoint,
-            static_cfg.application_binary.clone(),
-        )));
-    }
-
-    if to_vpp {
-        let vpp_bus_endpoint = bus.add_rx();
-        receivers.push(Box::new(VPPReceiver::new(
-            vpp_bus_endpoint,
-            static_cfg.application_binary.clone(),
-            runtime_cfg.br_mode == BrMode::BrTarget,
+            perfetto_symbol_index,
+            perfetto_insn_index,
         )));
     }
 
