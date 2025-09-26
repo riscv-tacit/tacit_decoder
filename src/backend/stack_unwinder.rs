@@ -139,9 +139,9 @@ impl StackUnwinder {
         prv_arc: &(Prv, Prv),
         to_addr: u64,
     ) -> Option<StackUpdateResult> {
+        self.curr_prv = prv_arc.1;
         match reason {
             TrapReason::Exception | TrapReason::Interrupt => {
-                self.curr_prv = prv_arc.1;
                 let frame = self.push_frame(self.curr_prv, to_addr);
                 if let Some(frame) = frame {
                     return Some(StackUpdateResult {
