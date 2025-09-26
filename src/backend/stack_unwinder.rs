@@ -44,7 +44,10 @@ impl StackUnwinder {
 
     fn push_frame(&mut self, prv: Prv, addr: u64) -> Option<Frame> {
         let map = self.func_symbol_map.get(prv);
-        let (start, symbol) = map.range(..=addr).next_back()?;
+        if !map.contains_key(&addr) {
+            return None;
+        }
+        let (start, symbol) = map.get_key_value(&addr)?;
         let frame = Frame {
             symbol: symbol.clone(),
             addr: *start,
