@@ -35,7 +35,7 @@ impl StackTxtReceiver {
 
     fn dump_current_stack(&mut self) -> std::io::Result<()> {
         writeln!(self.writer, "  Stack:")?;
-        for frame in self.unwinder.peak_curr_frames() {
+        for frame in self.unwinder.peek_all_frames() {
             writeln!(
                 self.writer,
                 "    {:?} :: {} @ {:?}",

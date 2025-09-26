@@ -45,7 +45,7 @@ impl AtomicReceiver {
 
     fn write_stack_snapshot(&mut self) {
         writeln!(self.writer, "  Call stack:").unwrap();
-        for frame in self.unwinder.peak_curr_frames() {
+        for frame in self.unwinder.peek_all_frames() {
             self.write_frame(&frame);
         }
         writeln!(self.writer).unwrap();

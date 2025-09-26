@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use crate::backend::event::{Entry, EventKind};
+use crate::backend::event::{Entry, EventKind, TrapReason};
 use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
 use crate::common::symbol_index::{SymbolIndex, SymbolInfo};
@@ -66,6 +66,7 @@ impl StackUnwinder {
             } => self.step_sync_start(start_prv),
             EventKind::InferrableJump { arc } => self.step_ij(arc.1),
             EventKind::UninferableJump { arc } => self.step_uj(arc.1),
+            EventKind::Trap { reason, prv_arc, arc } => self.step_trap(reason, prv_arc, arc.1),
             _ => return None,
         }
     }
@@ -113,9 +114,8 @@ impl StackUnwinder {
         //    treat it like a return within the unwinding loop.
         let mut closed: Vec<Frame> = Vec::new();
         loop {
-            let frame = self.pop_frame();
+            let frame = self.peek_head_frames();
             if let Some(frame) = frame {
-                closed.push(frame.clone());
                 let (start, end) = self
                     .func_symbol_map
                     .range(self.curr_prv, frame.addr)
@@ -127,8 +127,54 @@ impl StackUnwinder {
                         frames_closed: closed,
                     });
                 }
+                closed.push(self.pop_frame().unwrap());
             } else {
-                return None;
+                return Some(StackUpdateResult {
+                    frame_stack_size: self.frame_stack.len(),
+                    frames_opened: Vec::new(),
+                    frames_closed: closed,
+                });
+            }
+        }
+    }
+
+    pub fn step_trap(&mut self, reason: &TrapReason, prv_arc: &(Prv, Prv), to_addr: u64) -> Option<StackUpdateResult> {
+        match reason {
+            TrapReason::Exception | TrapReason::Interrupt => {
+                self.curr_prv = prv_arc.1;
+                let frame = self.push_frame(self.curr_prv, to_addr);
+                if let Some(frame) = frame {
+                    return Some(StackUpdateResult {
+                        frame_stack_size: self.frame_stack.len(),
+                        frames_opened: vec![frame],
+                        frames_closed: Vec::new(),
+                    });
+                } else {
+                    return None;
+                }
+            }
+            TrapReason::Return => {
+                // pop until we find the frame with the same prv as the current prv
+                let mut closed: Vec<Frame> = Vec::new();
+                loop {
+                    let frame = self.peek_head_frames();
+                    if let Some(frame) = frame {
+                        if frame.prv == self.curr_prv {
+                            return Some(StackUpdateResult {
+                                frame_stack_size: self.frame_stack.len(),
+                                frames_opened: Vec::new(),
+                                frames_closed: closed,
+                            });
+                        }
+                        closed.push(self.pop_frame().unwrap());
+                    } else {
+                        return Some(StackUpdateResult {
+                            frame_stack_size: self.frame_stack.len(),
+                            frames_opened: Vec::new(),
+                            frames_closed: closed,
+                        });
+                    }
+                }
             }
         }
     }
@@ -142,7 +188,15 @@ impl StackUnwinder {
         });
     }
 
-    pub fn peak_curr_frames(&self) -> Vec<Frame> {
+    pub fn peek_all_frames(&self) -> Vec<Frame> {
         self.frame_stack.clone()
+    }
+
+    pub fn peek_head_frames(&self) -> Option<Frame> {
+        if self.frame_stack.is_empty() {
+            None
+        } else {
+            Some(self.frame_stack.last().unwrap().clone())
+        }
     }
 }
