@@ -1,6 +1,7 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
+use crate::backend::event::{Entry, EventKind};
 use crate::frontend::br_mode;
+use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use bus::BusReader;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -8,7 +9,7 @@ use std::io::{BufWriter, Write};
 pub struct StatsReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
-    br_mode: br_mode::BrMode,
+    runtime_cfg: DecoderRuntimeCfg,
     file_size: u64,
     packet_count: u64,
     insn_count: u64,
@@ -17,7 +18,7 @@ pub struct StatsReceiver {
 }
 
 impl StatsReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, br_mode: br_mode::BrMode, file_size: u64) -> Self {
+    pub fn new(bus_rx: BusReader<Entry>, runtime_cfg: DecoderRuntimeCfg, file_size: u64) -> Self {
         Self {
             writer: BufWriter::new(File::create("trace.stats.txt").unwrap()),
             receiver: BusReceiver {
@@ -29,7 +30,7 @@ impl StatsReceiver {
             insn_count: 0,
             hit_count: 0,
             miss_count: 0,
-            br_mode: br_mode,
+            runtime_cfg: runtime_cfg,
             file_size: file_size,
         }
     }
@@ -45,29 +46,25 @@ impl AbstractReceiver for StatsReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::None => {
-                self.insn_count += 1;
-            }
-            Event::BPHit => {
-                if self.br_mode == br_mode::BrMode::BrPredict {
-                    self.packet_count += 1;
-                    self.hit_count += entry.timestamp.unwrap();
-                }
-            }
-            Event::BPMiss => {
-                if self.br_mode == br_mode::BrMode::BrPredict {
-                    self.packet_count += 1;
-                    self.miss_count += 1;
-                }
-            }
-            Event::TakenBranch | Event::NonTakenBranch => {
-                if self.br_mode != br_mode::BrMode::BrPredict {
-                    self.packet_count += 1;
-                }
-            }
-            _ => {
+        match entry {
+            Entry::Event { kind, .. } => {
                 self.packet_count += 1;
+                match kind {
+                    EventKind::BPHit { hit_count } => {
+                        if self.runtime_cfg.br_mode == br_mode::BrMode::BrPredict {
+                            self.hit_count += hit_count;
+                        }
+                    }
+                    EventKind::BPMiss => {
+                        if self.runtime_cfg.br_mode == br_mode::BrMode::BrPredict {
+                            self.miss_count += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Entry::Instruction { insn: _, pc: _ } => {
+                self.insn_count += 1;
             }
         }
     }
@@ -79,7 +76,7 @@ impl AbstractReceiver for StatsReceiver {
         self.writer
             .write_all(format!("packet count: {}\n", self.packet_count).as_bytes())
             .unwrap();
-        if self.br_mode == br_mode::BrMode::BrPredict {
+        if self.runtime_cfg.br_mode == br_mode::BrMode::BrPredict {
             self.writer
                 .write_all(
                     format!(

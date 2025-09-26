@@ -1,56 +1,73 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
-use crate::backend::event::{Entry, Event};
-use crate::backend::stack_unwinder::{StackUnwinder, SymbolInfo};
+use crate::backend::event::Entry;
+use crate::backend::stack_unwinder::{StackUnwinder, StackUpdateResult};
 use bus::BusReader;
-use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::sync::Arc;
+
+use crate::common::insn_index::InstructionIndex;
+use crate::common::symbol_index::SymbolIndex;
 
 pub struct StackTxtReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
-    stack_unwinder: StackUnwinder,
-    symbol_index: BTreeMap<u64, SymbolInfo>,
+    unwinder: StackUnwinder,
 }
 
 impl StackTxtReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, elf_path: String) -> Self {
-        let stack_unwinder = StackUnwinder::new(elf_path.clone()).unwrap();
-
-        // Build a map from function start address -> SymbolInfo
-        let mut symbol_index = BTreeMap::new();
-        for (&addr, info) in stack_unwinder.func_symbol_map().iter() {
-            symbol_index.insert(addr, info.clone());
-        }
-
-        StackTxtReceiver {
+    pub fn new(
+        bus_rx: BusReader<Entry>,
+        symbols: Arc<SymbolIndex>,
+        insns: Arc<InstructionIndex>,
+    ) -> Self {
+        let unwinder = StackUnwinder::new(symbols, insns).expect("init unwinder");
+        Self {
             writer: BufWriter::new(File::create("trace.stack.txt").unwrap()),
             receiver: BusReceiver {
                 name: "stacktxt".into(),
                 bus_rx,
                 checksum: 0,
             },
-            stack_unwinder,
-            symbol_index,
+            unwinder,
         }
     }
 
-    /// Look up the symbol whose start address is the greatest <= PC
-    fn lookup_symbol(&self, pc: u64) -> Option<(&u64, &SymbolInfo)> {
-        self.symbol_index.range(..=pc).next_back()
-    }
-
-    /// Helper to dump the current unwinder stack
     fn dump_current_stack(&mut self) -> std::io::Result<()> {
-        writeln!(self.writer, "  Call stack:")?;
-        // This requires you add to StackUnwinder:
-        //    pub fn current_frame_addrs(&self) -> &[u64];
-        for frame_addr in self.stack_unwinder.current_frame_addrs() {
-            let info = &self.symbol_index[&frame_addr];
-            writeln!(self.writer, "    {} @ 0x{:x}", info.name, frame_addr)?;
+        let all_frames = self.unwinder.peek_all_frames();
+        let size = all_frames.len();
+        writeln!(self.writer, "  Stack (size: {})", size)?;
+        for frame in all_frames {
+            writeln!(
+                self.writer,
+                "    {:?} :: {} @ {:?}",
+                frame.symbol.prv, frame.symbol.name, frame.symbol.src
+            )?;
         }
         writeln!(self.writer)?;
         Ok(())
+    }
+
+    fn handle_stack_update(&mut self, ts: u64, update: StackUpdateResult) {
+        for frame in update.frames_closed {
+            writeln!(
+                self.writer,
+                "[ts {ts}] pop {:?} :: {} @ 0x{:x}",
+                frame.symbol.prv, frame.symbol.name, frame.addr
+            )
+            .unwrap();
+        }
+
+        for frame in update.frames_opened {
+            writeln!(
+                self.writer,
+                "[ts {ts}] push {:?} :: {} @ 0x{:x}",
+                frame.symbol.prv, frame.symbol.name, frame.addr
+            )
+            .unwrap();
+        }
+
+        self.dump_current_stack().unwrap();
     }
 }
 
@@ -64,52 +81,15 @@ impl AbstractReceiver for StackTxtReceiver {
     }
 
     fn _receive_entry(&mut self, entry: Entry) {
-        match entry.event {
-            Event::InferrableJump | Event::TrapException | Event::TrapInterrupt => {
-                let ts = entry.timestamp.unwrap_or(0);
-                let pc = entry.arc.1;
-
-                // update the unwinder’s internal stack
-                let _ = self.stack_unwinder.step_ij(entry.clone());
-
-                // describe the new PC
-                let sym_desc = if let Some((start, info)) = self.lookup_symbol(pc) {
-                    format!("{} @ 0x{:x}", info.name, start)
-                } else {
-                    format!("0x{:x}", pc)
-                };
-
-                writeln!(
-                    self.writer,
-                    "[timestamp: {}] {:?} -> {}",
-                    ts, entry.event, sym_desc
-                )
-                .unwrap();
-                self.dump_current_stack().unwrap();
+        match entry {
+            Entry::Instruction { insn: _, pc: _ } => {}
+            Entry::Event { timestamp, kind } => {
+                // log the event
+                writeln!(self.writer, "[ts {timestamp}] {:?}", kind).unwrap();
+                if let Some(update) = self.unwinder.step(&Entry::Event { timestamp, kind }) {
+                    self.handle_stack_update(timestamp, update);
+                }
             }
-
-            Event::UninferableJump | Event::TrapReturn => {
-                let ts = entry.timestamp.unwrap_or(0);
-                let pc = entry.arc.1;
-
-                // pop/push via the unwinder
-                let _ = self.stack_unwinder.step_uj(entry.clone());
-
-                let sym_desc = if let Some((start, info)) = self.lookup_symbol(pc) {
-                    format!("{} @ 0x{:x}", info.name, start)
-                } else {
-                    format!("0x{:x}", pc)
-                };
-
-                writeln!(
-                    self.writer,
-                    "[timestamp: {}] {:?} -> {}",
-                    ts, entry.event, sym_desc
-                )
-                .unwrap();
-                self.dump_current_stack().unwrap();
-            }
-            _ => {}
         }
     }
 

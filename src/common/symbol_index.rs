@@ -1,0 +1,148 @@
+use addr2line::gimli::CommonInformationEntry;
+use addr2line::Loader;
+use anyhow::Result;
+use log::{debug, warn};
+use object::elf::SHF_EXECINSTR;
+use object::{Object, ObjectSection, ObjectSymbol, SectionFlags};
+use std::collections::BTreeMap;
+use std::fs;
+
+use crate::common::prv::Prv;
+use crate::common::source_location::SourceLocation;
+use crate::common::static_cfg::DecoderStaticCfg;
+
+// everything you need to know about a symbol
+#[derive(Debug, Clone)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub src: SourceLocation,
+    pub prv: Prv,
+}
+
+pub struct SymbolIndex {
+    // use BTreeMap as symbol maps need to be ordered
+    u_symbol_map: BTreeMap<u64, SymbolInfo>,
+    k_symbol_map: BTreeMap<u64, SymbolInfo>,
+    m_symbol_map: BTreeMap<u64, SymbolInfo>,
+}
+
+impl SymbolIndex {
+    pub fn get(&self, prv: Prv) -> &BTreeMap<u64, SymbolInfo> {
+        match prv {
+            Prv::PrvUser => &self.u_symbol_map,
+            Prv::PrvSupervisor => &self.k_symbol_map,
+            Prv::PrvMachine => &self.m_symbol_map,
+            _ => panic!("Unsupported privilege level: {:?}", prv),
+        }
+    }
+
+    /// Return the half-open address range `[start, end)` for the function that
+    /// begins at `addr`. The end is the start of the next symbol in that
+    /// privilege space, or `u64::MAX` if this is the last symbol.
+    pub fn range(&self, prv: Prv, addr: u64) -> Option<(u64, u64)> {
+        let map = self.get(prv);
+
+        if !map.contains_key(&addr) {
+            return None;
+        }
+
+        // Find the symbol that starts at `addr` (or the nearest one <= addr)
+        let (&start, _) = map.range(..=addr).next_back()?;
+
+        // End is the next symbol start, if any
+        let end = map
+            .range((start + 1)..)
+            .next()
+            .map(|(&next_start, _)| next_start)
+            .unwrap_or(u64::MAX);
+
+        Some((start, end))
+    }
+}
+pub fn build_single_symbol_index(
+    elf_path: String,
+    prv: Prv,
+    offset: u64,
+) -> Result<BTreeMap<u64, SymbolInfo>> {
+    // open application elf for symbol processing
+    let elf_data = fs::read(&elf_path)?;
+    let obj_file = object::File::parse(&*elf_data)?;
+    let loader = Loader::new(&elf_path).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+
+    // Gather indices of all executable sections
+    let exec_secs: std::collections::HashSet<_> = obj_file
+        .sections()
+        .filter_map(|sec| {
+            if let SectionFlags::Elf { sh_flags } = sec.flags() {
+                if sh_flags & (SHF_EXECINSTR as u64) != 0 {
+                    return Some(sec.index());
+                }
+            }
+            None
+        })
+        .collect();
+    // Build func_symbol_map from _all_ symbols in executable sections
+    let mut func_symbol_map: BTreeMap<u64, SymbolInfo> = BTreeMap::new();
+    for symbol in obj_file.symbols() {
+        // only symbols tied to an exec section
+        if let Some(sec_idx) = symbol.section_index() {
+            if exec_secs.contains(&sec_idx) {
+                if let Ok(name) = symbol.name() {
+                    // filter out ghost symbols
+                    if !name.starts_with("$x") {
+                        let addr = symbol.address();
+                        // lookup source location (may return None)
+                        let loc = loader.find_location(addr);
+                        let mut info: SymbolInfo = SymbolInfo {
+                            name: name.to_string(),
+                            src: SourceLocation {
+                                file: String::new(),
+                                lines: 0,
+                                prv: prv,
+                            },
+                            prv: prv,
+                        };
+                        if let Ok(Some(loc)) = loc {
+                            let src: SourceLocation = SourceLocation::from_addr2line(loc, prv);
+                            info.src = src;
+                        }
+                        // dedupe aliases: prefer non‑empty over empty
+                        if let Some(existing) = func_symbol_map.get_mut(&addr) {
+                            if existing.name.trim().is_empty() && !info.name.trim().is_empty() {
+                                *existing = info;
+                            } else {
+                                warn!(
+                                    "func_addr 0x{:x} already in map as `{}`, ignoring alias `{}`",
+                                    addr, existing.name, info.name
+                                );
+                            }
+                        } else {
+                            func_symbol_map.insert(addr + offset, info);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    debug!("func_symbol_map size: {}", func_symbol_map.len());
+    Ok(func_symbol_map)
+}
+
+pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
+    let u_func_symbol_map =
+        build_single_symbol_index(cfg.application_binary.clone(), Prv::PrvUser, 0)?;
+    let mut k_func_symbol_map =
+        build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0)?;
+    for (binary, entry) in cfg.driver_binary_entry_tuples {
+        let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
+        let func_symbol_map =
+            build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point)?;
+        k_func_symbol_map.extend(func_symbol_map);
+    }
+    let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0)?;
+    Ok(SymbolIndex {
+        u_symbol_map: u_func_symbol_map,
+        k_symbol_map: k_func_symbol_map,
+        m_symbol_map: m_func_symbol_map,
+    })
+}

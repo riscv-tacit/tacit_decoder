@@ -3,11 +3,11 @@ use log::trace;
 use std::fs::File;
 use std::io::{BufReader, Read};
 
+use crate::common::prv::*;
 use crate::frontend::br_mode::*;
 use crate::frontend::c_header::*;
 use crate::frontend::ctx_mode::*;
 use crate::frontend::f_header::*;
-use crate::common::prv::*;
 use crate::frontend::runtime_cfg::*;
 use crate::frontend::sync_type::*;
 use crate::frontend::trap_type::*;
@@ -83,7 +83,10 @@ fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
     let result = read_u8(stream)?;
     let from_prv = Prv::from((result & 0b111) as u64);
     let target_prv = Prv::from(((result >> 3) & 0b111) as u64);
-    assert!(0b10 == (result >> 6 & 0b11), "checksum for prv byte should be 0b10");
+    assert!(
+        0b10 == (result >> 6 & 0b11),
+        "checksum for prv byte should be 0b10"
+    );
     Ok((from_prv, target_prv))
 }
 
@@ -102,7 +105,6 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
         CHeader::CNa => {
             packet.is_compressed = false;
             let f_header = FHeader::from((first_byte & F_HEADER_MASK) >> FHEADER_OFFSET);
-            // println!("f_header: {:?}", f_header);
             match f_header {
                 FHeader::FTb | FHeader::FNt | FHeader::FIj => {
                     packet.timestamp = read_varint(stream)?;
@@ -123,6 +125,10 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                         "SyncStart should not be observed other than in read_first_packet"
                     );
                     packet.func3 = SubFunc3::SyncType(sync_type);
+                    let (from_prv, target_prv) = read_prv(stream)?;
+                    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
+                    packet.from_prv = from_prv;
+                    packet.target_prv = target_prv;
                     packet.target_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
@@ -142,7 +148,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     packet.c_header = CHeader::CNa;
                 }
                 _ => {
-                    println!("Invalid FHeader value: {}", first_byte);
+                    panic!("Invalid FHeader value: {}", first_byte);
                 }
             }
         }
@@ -183,7 +189,10 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
     packet.c_header = c_header;
     packet.f_header = f_header;
     packet.func3 = SubFunc3::SyncType(sync_type);
-    assert!(packet.func3 == SubFunc3::SyncType(SyncType::SyncStart), "func3 should be SyncStart");
+    assert!(
+        packet.func3 == SubFunc3::SyncType(SyncType::SyncStart),
+        "func3 should be SyncStart"
+    );
 
     let (from_prv, target_prv) = read_prv(stream)?;
     packet.from_prv = from_prv;
