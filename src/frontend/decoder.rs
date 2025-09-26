@@ -134,7 +134,7 @@ pub fn decode_trace(
             let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(
-                EventKind::trap(TrapReason::from(trap_type), (prv, prv)),
+                EventKind::trap(TrapReason::from(trap_type), (prv, packet.target_prv)),
                 timestamp,
             ));
             prv = packet.target_prv;
