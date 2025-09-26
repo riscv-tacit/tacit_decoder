@@ -55,7 +55,7 @@ impl AtomicReceiver {
         writeln!(
             self.writer,
             "    {:?} :: {} @ 0x{:x}",
-            frame.prv, frame.symbol.name, frame.addr
+            frame.symbol.prv, frame.symbol.name, frame.addr
         )
         .unwrap();
     }

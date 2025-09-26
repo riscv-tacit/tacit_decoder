@@ -34,12 +34,14 @@ impl StackTxtReceiver {
     }
 
     fn dump_current_stack(&mut self) -> std::io::Result<()> {
-        writeln!(self.writer, "  Stack:")?;
-        for frame in self.unwinder.peek_all_frames() {
+        let all_frames = self.unwinder.peek_all_frames();
+        let size = all_frames.len();
+        writeln!(self.writer, "  Stack (size: {})", size)?;
+        for frame in all_frames {
             writeln!(
                 self.writer,
                 "    {:?} :: {} @ {:?}",
-                frame.prv, frame.symbol.name, frame.symbol.src
+                frame.symbol.prv, frame.symbol.name, frame.symbol.src
             )?;
         }
         writeln!(self.writer)?;
@@ -51,7 +53,7 @@ impl StackTxtReceiver {
             writeln!(
                 self.writer,
                 "[ts {ts}] pop {:?} :: {} @ 0x{:x}",
-                frame.prv, frame.symbol.name, frame.addr
+                frame.symbol.prv, frame.symbol.name, frame.addr
             )
             .unwrap();
         }
@@ -60,12 +62,10 @@ impl StackTxtReceiver {
             writeln!(
                 self.writer,
                 "[ts {ts}] push {:?} :: {} @ 0x{:x}",
-                frame.prv, frame.symbol.name, frame.addr
+                frame.symbol.prv, frame.symbol.name, frame.addr
             )
             .unwrap();
         }
-
-        writeln!(self.writer, "  depth={}", update.frame_stack_size).unwrap();
 
         self.dump_current_stack().unwrap();
     }
@@ -84,6 +84,8 @@ impl AbstractReceiver for StackTxtReceiver {
         match entry {
             Entry::Instruction { insn: _, pc: _ } => {}
             Entry::Event { timestamp, kind } => {
+                // log the event
+                writeln!(self.writer, "[ts {timestamp}] {:?}", kind).unwrap();
                 if let Some(update) = self.unwinder.step(&Entry::Event { timestamp, kind }) {
                     self.handle_stack_update(timestamp, update);
                 }

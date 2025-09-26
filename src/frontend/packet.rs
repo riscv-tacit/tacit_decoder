@@ -125,6 +125,10 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                         "SyncStart should not be observed other than in read_first_packet"
                     );
                     packet.func3 = SubFunc3::SyncType(sync_type);
+                    let (from_prv, target_prv) = read_prv(stream)?;
+                    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
+                    packet.from_prv = from_prv;
+                    packet.target_prv = target_prv;
                     packet.target_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;

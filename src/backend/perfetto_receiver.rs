@@ -62,7 +62,7 @@ impl PerfettoReceiver {
             "tid": 0,
             "args": {
                 "addr": format!("0x{:x}", frame.addr),
-                "prv": format!("{:?}", frame.prv),
+                "prv": format!("{:?}", frame.symbol.prv),
                 "file": frame.symbol.src.file,
                 "line": frame.symbol.src.lines,
             }

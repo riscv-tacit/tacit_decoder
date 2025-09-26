@@ -84,7 +84,7 @@ impl SpeedscopeReceiver {
     }
 
     fn lookup_frame(&self, frame: &Frame) -> Option<u32> {
-        let key = (frame.prv, frame.addr);
+        let key = (frame.symbol.prv, frame.addr);
         let id = self.frame_lookup.get(&key)?;
         Some(*id)
     }
@@ -166,10 +166,16 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, HashMap<(Prv, u64), u32>)
     let mut lookup = HashMap::new();
 
     for prv in [Prv::PrvUser, Prv::PrvSupervisor, Prv::PrvMachine] {
+        let prv_str = match prv {
+            Prv::PrvUser => "u",
+            Prv::PrvSupervisor => "k",
+            Prv::PrvHypervisor => "h",
+            Prv::PrvMachine => "m",
+        };
         for (&addr, info) in symbols.get(prv).iter() {
             let id = frames.len() as u32;
             frames.push(json!({
-                "name": info.name,
+                "name": format!("{}:{}", prv_str, info.name),
                 "file": info.src.file,
                 "line": info.src.lines,
             }));

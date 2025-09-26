@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::debug;
 use std::sync::Arc;
 
 use crate::backend::event::{Entry, EventKind, TrapReason};
@@ -6,9 +7,8 @@ use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
 use crate::common::symbol_index::{SymbolIndex, SymbolInfo};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Frame {
-    pub prv: Prv,
     pub symbol: SymbolInfo,
     pub addr: u64,
 }
@@ -25,7 +25,6 @@ pub struct StackUnwinder {
 }
 
 pub struct StackUpdateResult {
-    pub frame_stack_size: usize,
     pub frames_opened: Vec<Frame>,
     pub frames_closed: Vec<Frame>,
 }
@@ -39,13 +38,17 @@ impl StackUnwinder {
             func_symbol_map: func_symbol_map,
             insn_map: insn_index,
             frame_stack: Vec::new(),
-            curr_prv: Prv::PrvMachine,
+            curr_prv: Prv::PrvMachine, // placeholder, will be set by the first sync start event
         })
     }
 
     fn push_frame(&mut self, prv: Prv, addr: u64) -> Option<Frame> {
-        let symbol = self.func_symbol_map.get(prv).get(&addr).cloned()?;
-        let frame = Frame { prv, symbol, addr };
+        let map = self.func_symbol_map.get(prv);
+        let (start, symbol) = map.range(..=addr).next_back()?;
+        let frame = Frame {
+            symbol: symbol.clone(),
+            addr: *start,
+        };
         self.frame_stack.push(frame.clone());
         Some(frame)
     }
@@ -66,7 +69,11 @@ impl StackUnwinder {
             } => self.step_sync_start(start_prv),
             EventKind::InferrableJump { arc } => self.step_ij(arc.1),
             EventKind::UninferableJump { arc } => self.step_uj(arc.1),
-            EventKind::Trap { reason, prv_arc, arc } => self.step_trap(reason, prv_arc, arc.1),
+            EventKind::Trap {
+                reason,
+                prv_arc,
+                arc,
+            } => self.step_trap(reason, prv_arc, arc.1),
             _ => return None,
         }
     }
@@ -78,9 +85,9 @@ impl StackUnwinder {
 
     pub fn step_ij(&mut self, to_addr: u64) -> Option<StackUpdateResult> {
         let frame = self.push_frame(self.curr_prv, to_addr);
+        debug!("stack unwinder push frame {:?}", frame);
         if let Some(frame) = frame {
             return Some(StackUpdateResult {
-                frame_stack_size: self.frame_stack.len(),
                 frames_opened: vec![frame],
                 frames_closed: Vec::new(),
             });
@@ -91,23 +98,15 @@ impl StackUnwinder {
 
     pub fn step_uj(&mut self, to_addr: u64) -> Option<StackUpdateResult> {
         let target = to_addr;
-        // If we see an indirect call, push the new function
-        let is_call = self
-            .func_symbol_map
-            .get(self.curr_prv)
-            .contains_key(&target);
-        if is_call {
-            let frame: Frame = Frame {
-                prv: self.curr_prv,
-                symbol: self.func_symbol_map.get(self.curr_prv)[&target].clone(),
-                addr: target,
-            };
-            self.frame_stack.push(frame.clone());
-            return Some(StackUpdateResult {
-                frame_stack_size: self.frame_stack.len(),
-                frames_opened: vec![frame],
-                frames_closed: Vec::new(),
-            });
+        if let Some((start, _)) = self.func_symbol_map.range(self.curr_prv, target) {
+            if start == target {
+                if let Some(frame) = self.push_frame(self.curr_prv, target) {
+                    return Some(StackUpdateResult {
+                        frames_opened: vec![frame],
+                        frames_closed: Vec::new(),
+                    });
+                }
+            }
         }
 
         // Otherwise, if it's an indirect jump and we still have frames,
@@ -116,21 +115,17 @@ impl StackUnwinder {
         loop {
             let frame = self.peek_head_frames();
             if let Some(frame) = frame {
-                let (start, end) = self
-                    .func_symbol_map
-                    .range(self.curr_prv, frame.addr)
-                    .expect("missing symbol in map");
-                if start <= target && end > target {
-                    return Some(StackUpdateResult {
-                        frame_stack_size: self.frame_stack.len(),
-                        frames_opened: Vec::new(),
-                        frames_closed: closed,
-                    });
+                if let Some((start, end)) = self.func_symbol_map.range(self.curr_prv, frame.addr) {
+                    if start <= target && end > target {
+                        return Some(StackUpdateResult {
+                            frames_opened: Vec::new(),
+                            frames_closed: closed,
+                        });
+                    }
                 }
                 closed.push(self.pop_frame().unwrap());
             } else {
                 return Some(StackUpdateResult {
-                    frame_stack_size: self.frame_stack.len(),
                     frames_opened: Vec::new(),
                     frames_closed: closed,
                 });
@@ -138,14 +133,18 @@ impl StackUnwinder {
         }
     }
 
-    pub fn step_trap(&mut self, reason: &TrapReason, prv_arc: &(Prv, Prv), to_addr: u64) -> Option<StackUpdateResult> {
+    pub fn step_trap(
+        &mut self,
+        reason: &TrapReason,
+        prv_arc: &(Prv, Prv),
+        to_addr: u64,
+    ) -> Option<StackUpdateResult> {
         match reason {
             TrapReason::Exception | TrapReason::Interrupt => {
                 self.curr_prv = prv_arc.1;
                 let frame = self.push_frame(self.curr_prv, to_addr);
                 if let Some(frame) = frame {
                     return Some(StackUpdateResult {
-                        frame_stack_size: self.frame_stack.len(),
                         frames_opened: vec![frame],
                         frames_closed: Vec::new(),
                     });
@@ -159,9 +158,8 @@ impl StackUnwinder {
                 loop {
                     let frame = self.peek_head_frames();
                     if let Some(frame) = frame {
-                        if frame.prv == self.curr_prv {
+                        if frame.symbol.prv == self.curr_prv {
                             return Some(StackUpdateResult {
-                                frame_stack_size: self.frame_stack.len(),
                                 frames_opened: Vec::new(),
                                 frames_closed: closed,
                             });
@@ -169,7 +167,6 @@ impl StackUnwinder {
                         closed.push(self.pop_frame().unwrap());
                     } else {
                         return Some(StackUpdateResult {
-                            frame_stack_size: self.frame_stack.len(),
                             frames_opened: Vec::new(),
                             frames_closed: closed,
                         });
@@ -180,11 +177,14 @@ impl StackUnwinder {
     }
 
     pub fn flush(&mut self) -> Option<StackUpdateResult> {
-        // just return the frames
+        // just return the frames, in reverse order
+        let mut closed = Vec::new();
+        while let Some(frame) = self.pop_frame() {
+            closed.push(frame);
+        }
         return Some(StackUpdateResult {
-            frame_stack_size: self.frame_stack.len(),
             frames_opened: Vec::new(),
-            frames_closed: self.frame_stack.clone(),
+            frames_closed: closed,
         });
     }
 

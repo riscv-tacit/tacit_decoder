@@ -87,7 +87,11 @@ impl EventKind {
     }
 
     pub fn trap(reason: TrapReason, prv_arc: (Prv, Prv), arc: (u64, u64)) -> Self {
-        EventKind::Trap { reason, prv_arc, arc }
+        EventKind::Trap {
+            reason,
+            prv_arc,
+            arc,
+        }
     }
 
     pub fn sync_start(runtime_cfg: DecoderRuntimeCfg, start_pc: u64, start_prv: Prv) -> Self {
