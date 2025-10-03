@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct DecoderStaticCfg {
     pub encoded_trace: String,
-    pub application_binary: String,
+    pub application_binary_asid_tuples: Vec<(String, String)>,
     pub sbi_binary: String,
     pub kernel_binary: String,
     pub kernel_jump_label_patch_log: String,

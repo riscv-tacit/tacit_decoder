@@ -1,11 +1,15 @@
 {
   "encoded_trace": "../firemarshal/tacit.out",
-  "application_binary": "../firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/trace-hello",
+  "application_binary_asid_tuples": [
+    ["../firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/hello", "115"],
+    ["../firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/trace-submit", "113"]
+  ],
   "sbi_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin",
   "kernel_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin-dwarf",
   "kernel_jump_label_patch_log": "configs/jump_label_patch_map.txt",
   "driver_binary_entry_tuples": [
-    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff0177d000"]
+    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff0169d000"],
+    ["../firemarshal/images/firechip/trace-hello/iceblk-dwarf", "0xffffffff016ac000"]
   ],
   "header_only": false,
   "to_stats": false,

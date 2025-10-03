@@ -151,7 +151,7 @@ fn main() -> Result<()> {
 
     // Resolve toggles: config file takes precedence if provided; otherwise use CLI flags
     let encoded_trace = pick_arg(args.encoded_trace, file_cfg.encoded_trace);
-    let application_binary = pick_arg(args.application_binary, file_cfg.application_binary);
+    let application_binary_asid_tuples = file_cfg.application_binary_asid_tuples;
     let kernel_binary = pick_arg(args.kernel_binary, file_cfg.kernel_binary);
     let kernel_jump_label_patch_log = file_cfg.kernel_jump_label_patch_log;
     let driver_binary_entry_tuples = file_cfg.driver_binary_entry_tuples;
@@ -169,7 +169,7 @@ fn main() -> Result<()> {
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
     let static_cfg = DecoderStaticCfg {
         encoded_trace,
-        application_binary,
+        application_binary_asid_tuples,
         kernel_binary,
         kernel_jump_label_patch_log,
         driver_binary_entry_tuples,
@@ -188,13 +188,13 @@ fn main() -> Result<()> {
     };
 
     // verify the binary exists and is a file
-    if !Path::new(&static_cfg.application_binary).exists()
-        || !Path::new(&static_cfg.application_binary).is_file()
-    {
-        return Err(anyhow::anyhow!(
-            "Application binary file is not valid: {}",
-            static_cfg.application_binary
-        ));
+    for (binary, _) in static_cfg.application_binary_asid_tuples.clone() {
+        if !Path::new(&binary).exists() || !Path::new(&binary).is_file() {
+            return Err(anyhow::anyhow!(
+                "Application binary file is not valid: {}",
+                binary
+            ));
+        }
     }
     if static_cfg.sbi_binary != "" && !Path::new(&static_cfg.sbi_binary).exists()
         || !Path::new(&static_cfg.sbi_binary).is_file()
@@ -299,7 +299,7 @@ fn main() -> Result<()> {
 
     if to_afdo {
         let afdo_bus_endpoint = bus.add_rx();
-        let mut elf_file = File::open(static_cfg.application_binary.clone())?;
+        let mut elf_file = File::open(static_cfg.application_binary_asid_tuples[0].0.clone())?;
         let mut elf_buffer = Vec::new();
         elf_file.read_to_end(&mut elf_buffer)?;
         let elf = object::File::parse(&*elf_buffer)?;
@@ -315,7 +315,7 @@ fn main() -> Result<()> {
         receivers.push(Box::new(GcdaReceiver::new(
             gcda_bus_endpoint,
             gcno_path.clone(),
-            static_cfg.application_binary.clone(),
+            static_cfg.application_binary_asid_tuples[0].0.clone(),
         )));
     }
 

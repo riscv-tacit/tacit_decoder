@@ -5,7 +5,7 @@ use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
-use log::debug;
+use log::{debug, warn};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -21,11 +21,28 @@ struct ProfileEvent {
     at: u64,
 }
 
+struct Lookup {
+    u_lookup: HashMap<u64, HashMap<u64, u32>>,
+    k_lookup: HashMap<u64, u32>,
+    m_lookup: HashMap<u64, u32>,
+}
+
+impl Lookup {
+    fn lookup(&self, prv: Prv, ctx: u64, addr: u64) -> Option<u32> {
+        match prv {
+            Prv::PrvUser => self.u_lookup.get(&ctx).and_then(|lookup| lookup.get(&addr)).copied(),
+            Prv::PrvSupervisor => self.k_lookup.get(&addr).copied(),
+            Prv::PrvMachine => self.m_lookup.get(&addr).copied(),
+            _ => panic!("Unsupported privilege level: {:?}", prv),
+        }
+    }
+}
+
 pub struct SpeedscopeReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
     frames: Vec<Value>,
-    frame_lookup: HashMap<(Prv, u64), u32>,
+    frame_lookup: Lookup,
     start: u64,
     end: u64,
     events: Vec<ProfileEvent>,
@@ -69,6 +86,8 @@ impl SpeedscopeReceiver {
                     frame: id,
                     at: ts,
                 });
+            } else {
+                warn!("Frame not found: {:?}", frame);
             }
         }
 
@@ -79,14 +98,15 @@ impl SpeedscopeReceiver {
                     frame: id,
                     at: ts,
                 });
+            } else {
+                warn!("Frame not found: {:?}", frame);
             }
         }
     }
 
     fn lookup_frame(&self, frame: &Frame) -> Option<u32> {
-        let key = (frame.symbol.prv, frame.addr);
-        let id = self.frame_lookup.get(&key)?;
-        Some(*id)
+        let id = self.frame_lookup.lookup(frame.symbol.prv, frame.symbol.ctx, frame.addr);
+        id
     }
 }
 
@@ -160,28 +180,54 @@ impl AbstractReceiver for SpeedscopeReceiver {
     }
 }
 
-/// Build Speedscope frames and an address→frame-id lookup.
-fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, HashMap<(Prv, u64), u32>) {
-    let mut frames = Vec::new();
-    let mut lookup = HashMap::new();
 
-    for prv in [Prv::PrvUser, Prv::PrvSupervisor, Prv::PrvMachine] {
-        let prv_str = match prv {
-            Prv::PrvUser => "u",
-            Prv::PrvSupervisor => "k",
-            Prv::PrvHypervisor => "h",
-            Prv::PrvMachine => "m",
-        };
-        for (&addr, info) in symbols.get(prv).iter() {
+
+/// Build Speedscope frames and an address→frame-id lookup.
+fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
+    let mut frames = Vec::new();
+    let mut u_lookups: HashMap<u64, HashMap<u64, u32>> = HashMap::new();
+    let mut k_lookup: HashMap<u64, u32> = HashMap::new();
+    let mut m_lookup: HashMap<u64, u32> = HashMap::new();
+
+    for (&addr, info) in symbols.get(Prv::PrvSupervisor, 0).iter() {
+        let id = frames.len() as u32;
+        frames.push(json!({
+            "name": format!("{}:{}", "k", info.name),
+            "file": info.src.file,
+            "line": info.src.lines,
+        }));
+        k_lookup.insert( addr, id);
+    }
+
+    for (&addr, info) in symbols.get(Prv::PrvMachine, 0).iter() {
+        let id = frames.len() as u32;
+        frames.push(json!({
+            "name": format!("{}:{}", "m", info.name),
+            "file": info.src.file,
+            "line": info.src.lines,
+        }));
+        m_lookup.insert( addr, id);
+    }
+    // iterate over the user space symbol map
+    for (&asid, user_symbol_map) in symbols.get_user_symbol_map().iter() {
+        let mut u_lookup: HashMap<u64, u32> = HashMap::new();
+        for (&addr, info) in user_symbol_map.iter() {
             let id = frames.len() as u32;
             frames.push(json!({
-                "name": format!("{}:{}", prv_str, info.name),
+                "name": format!("{}:{}", asid, info.name),
                 "file": info.src.file,
                 "line": info.src.lines,
             }));
-            lookup.insert((prv, addr), id);
+            u_lookup.insert( addr, id);
         }
+        u_lookups.insert(asid, u_lookup);
     }
+
+    let lookup = Lookup {
+        u_lookup: u_lookups,
+        k_lookup: k_lookup,
+        m_lookup: m_lookup,
+    };
 
     (frames, lookup)
 }

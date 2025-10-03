@@ -27,8 +27,9 @@ pub struct Packet {
     pub func3: SubFunc3,
     pub target_address: u64,
     pub from_address: u64,
-    pub _ctx: u64, // unused for now
     pub target_prv: Prv,
+    pub from_ctx: u64, // used for debugging only
+    pub target_ctx: u64,
     pub from_prv: Prv,
     pub timestamp: u64,
 }
@@ -43,8 +44,9 @@ impl Packet {
             func3: SubFunc3::None,
             target_address: 0,
             from_address: 0,
-            _ctx: 0,
             target_prv: Prv::PrvUser,
+            from_ctx: 0,
+            target_ctx: 0,
             from_prv: Prv::PrvUser,
             timestamp: 0,
         }
@@ -129,6 +131,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
                     packet.from_prv = from_prv;
                     packet.target_prv = target_prv;
+                    packet.target_ctx = read_varint(stream)?;
                     packet.target_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
@@ -143,6 +146,13 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     packet.target_prv = target_prv;
                     packet.target_address = read_varint(stream)?;
                     packet.from_address = read_varint(stream)?;
+                    packet.timestamp = read_varint(stream)?;
+                    packet.f_header = f_header;
+                    packet.c_header = CHeader::CNa;
+                }
+                FHeader::FCtx => {
+                    packet.from_ctx = read_varint(stream)?;
+                    packet.target_ctx = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
@@ -198,6 +208,7 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
     packet.from_prv = from_prv;
     assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
     packet.target_prv = target_prv;
+    packet.target_ctx = read_varint(stream)?;
     packet.target_address = read_varint(stream)?;
     packet.timestamp = read_varint(stream)?;
 
@@ -206,18 +217,11 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
 
     let bp_entries = read_varint(stream)?;
 
-    let ctx_mode_raw = read_varint(stream)?;
-    let ctx_mode = CtxMode::from(ctx_mode_raw);
-
-    let ctx_id = read_varint(stream)?;
-
     Ok((
         packet,
         DecoderRuntimeCfg {
             br_mode,
             bp_entries,
-            ctx_mode,
-            ctx_id,
         },
     ))
 }

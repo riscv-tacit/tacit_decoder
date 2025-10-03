@@ -61,6 +61,7 @@ impl AbstractReceiver for AfdoReceiver {
                         runtime_cfg: _,
                         start_pc,
                         start_prv: _,
+                        start_ctx: _,
                     },
             } => {
                 self.last_record = (0, start_pc);

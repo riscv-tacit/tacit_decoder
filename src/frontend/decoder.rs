@@ -93,8 +93,9 @@ pub fn decode_trace(
     let mut pc = refund_addr(first_packet.target_address);
     let mut timestamp = first_packet.timestamp;
     let mut prv = first_packet.target_prv;
+    let mut ctx = first_packet.target_ctx;
     bus.broadcast(Entry::event(
-        EventKind::sync_start(first_runtime_cfg, pc, prv),
+        EventKind::sync_start(first_runtime_cfg, pc, prv, ctx),
         first_packet.timestamp,
     ));
 
@@ -106,13 +107,13 @@ pub fn decode_trace(
         debug!("packet: {:?}", packet);
         packet_count += 1;
 
-        // Select the correct instruction map based on privilege
-        let get_insn_map = |p: Prv| -> &HashMap<u64, Insn> { insn_index.get(p) };
+        // Select the correct instruction map based on privilege and context
+        let get_insn_map = |p: Prv, ctx: u64| -> &HashMap<u64, Insn> { insn_index.get(p, ctx) };
 
         if packet.f_header == FHeader::FSync {
             pc = step_bb_until(
                 pc,
-                get_insn_map(prv),
+                get_insn_map(prv, ctx),
                 refund_addr(packet.target_address),
                 &mut bus,
             );
@@ -122,7 +123,7 @@ pub fn decode_trace(
             // step until the trap's from_address (previous insn)
             pc = step_bb_until(
                 pc,
-                get_insn_map(prv),
+                get_insn_map(prv, ctx),
                 refund_addr(packet.from_address),
                 &mut bus,
             );
@@ -144,6 +145,12 @@ pub fn decode_trace(
             prv = packet.target_prv;
             pc = new_pc;
             continue;
+        } else if packet.f_header == FHeader::FCtx {
+            assert!(packet.from_ctx == ctx, "from_ctx should be the same as ctx");
+            ctx = packet.target_ctx;
+            timestamp += packet.timestamp;
+            bus.broadcast(Entry::event(EventKind::context_change(ctx), timestamp));
+            continue;
         }
 
         if mode_is_predict && packet.f_header == FHeader::FTb {
@@ -153,8 +160,8 @@ pub fn decode_trace(
                 packet.timestamp,
             ));
             for _ in 0..packet.timestamp {
-                pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
-                let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
+                pc = step_bb(pc, get_insn_map(prv, ctx), &mut bus, &br_mode);
+                let insn_to_resolve = get_insn_map(prv, ctx).get(&pc).unwrap();
                 if !insn_to_resolve.is_branch() {
                     bus.broadcast(Entry::event(EventKind::panic(), 0));
                     panic!("pc: {:x}, insn: {:?}", pc, insn_to_resolve);
@@ -182,8 +189,8 @@ pub fn decode_trace(
             // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(EventKind::bpmiss(), timestamp));
-            pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
-            let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
+            pc = step_bb(pc, get_insn_map(prv, ctx), &mut bus, &br_mode);
+            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc).unwrap();
             if !insn_to_resolve.is_branch() {
                 bus.broadcast(Entry::event(EventKind::panic(), 0));
                 panic!(
@@ -211,8 +218,8 @@ pub fn decode_trace(
             }
         } else {
             // branch target mode
-            pc = step_bb(pc, get_insn_map(prv), &mut bus, &br_mode);
-            let insn_to_resolve = get_insn_map(prv).get(&pc).unwrap();
+            pc = step_bb(pc, get_insn_map(prv, ctx), &mut bus, &br_mode);
+            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc).unwrap();
             timestamp += packet.timestamp;
             match packet.f_header {
                 FHeader::FTb => {

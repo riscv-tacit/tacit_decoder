@@ -72,6 +72,7 @@ impl AbstractReceiver for VBBReceiver {
                         runtime_cfg: _,
                         start_pc,
                         start_prv: _,
+                        start_ctx: _,
                     },
             } => {
                 self.prev_addr = start_pc;

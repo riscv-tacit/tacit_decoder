@@ -1,10 +1,9 @@
-use addr2line::gimli::CommonInformationEntry;
 use addr2line::Loader;
 use anyhow::Result;
 use log::{debug, warn};
 use object::elf::SHF_EXECINSTR;
 use object::{Object, ObjectSection, ObjectSymbol, SectionFlags};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 
 use crate::common::prv::Prv;
@@ -17,30 +16,35 @@ pub struct SymbolInfo {
     pub name: String,
     pub src: SourceLocation,
     pub prv: Prv,
+    pub ctx: u64,
 }
 
 pub struct SymbolIndex {
     // use BTreeMap as symbol maps need to be ordered
-    u_symbol_map: BTreeMap<u64, SymbolInfo>,
+    u_symbol_map: HashMap<u64, BTreeMap<u64, SymbolInfo>>,
     k_symbol_map: BTreeMap<u64, SymbolInfo>,
     m_symbol_map: BTreeMap<u64, SymbolInfo>,
 }
 
 impl SymbolIndex {
-    pub fn get(&self, prv: Prv) -> &BTreeMap<u64, SymbolInfo> {
+    pub fn get(&self, prv: Prv, ctx: u64) -> &BTreeMap<u64, SymbolInfo> {
         match prv {
-            Prv::PrvUser => &self.u_symbol_map,
+            Prv::PrvUser => &self.u_symbol_map[&ctx],
             Prv::PrvSupervisor => &self.k_symbol_map,
             Prv::PrvMachine => &self.m_symbol_map,
             _ => panic!("Unsupported privilege level: {:?}", prv),
         }
     }
 
+    pub fn get_user_symbol_map(&self) -> &HashMap<u64, BTreeMap<u64, SymbolInfo>> {
+        &self.u_symbol_map
+    }
+
     /// Return the half-open address range `[start, end)` for the function that
     /// begins at `addr`. The end is the start of the next symbol in that
     /// privilege space, or `u64::MAX` if this is the last symbol.
-    pub fn range(&self, prv: Prv, addr: u64) -> Option<(u64, u64)> {
-        let map = self.get(prv);
+    pub fn range(&self, prv: Prv, ctx: u64, addr: u64) -> Option<(u64, u64)> {
+        let map = self.get(prv, ctx);
 
         if !map.contains_key(&addr) {
             return None;
@@ -63,6 +67,7 @@ pub fn build_single_symbol_index(
     elf_path: String,
     prv: Prv,
     offset: u64,
+    ctx: u64,
 ) -> Result<BTreeMap<u64, SymbolInfo>> {
     // open application elf for symbol processing
     let elf_data = fs::read(&elf_path)?;
@@ -101,6 +106,7 @@ pub fn build_single_symbol_index(
                                 prv: prv,
                             },
                             prv: prv,
+                            ctx: ctx,
                         };
                         if let Ok(Some(loc)) = loc {
                             let src: SourceLocation = SourceLocation::from_addr2line(loc, prv);
@@ -129,19 +135,23 @@ pub fn build_single_symbol_index(
 }
 
 pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
-    let u_func_symbol_map =
-        build_single_symbol_index(cfg.application_binary.clone(), Prv::PrvUser, 0)?;
+    let mut u_symbol_maps = HashMap::new();
+    for (binary, asid) in cfg.application_binary_asid_tuples.clone() {
+        let u_func_symbol_map =
+            build_single_symbol_index(binary.clone(), Prv::PrvUser, 0, asid.parse::<u64>()?)?;
+        u_symbol_maps.insert(asid.parse::<u64>()?, u_func_symbol_map);
+    }
     let mut k_func_symbol_map =
-        build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0)?;
+        build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
     for (binary, entry) in cfg.driver_binary_entry_tuples {
         let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
         let func_symbol_map =
-            build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point)?;
+            build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point, 0)?;
         k_func_symbol_map.extend(func_symbol_map);
     }
-    let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0)?;
+    let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0 )?;
     Ok(SymbolIndex {
-        u_symbol_map: u_func_symbol_map,
+        u_symbol_map: u_symbol_maps,
         k_symbol_map: k_func_symbol_map,
         m_symbol_map: m_func_symbol_map,
     })

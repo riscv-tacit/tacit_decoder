@@ -33,6 +33,7 @@ pub enum EventKind {
         runtime_cfg: DecoderRuntimeCfg,
         start_pc: u64,
         start_prv: Prv,
+        start_ctx: u64,
     },
     SyncEnd {
         end_pc: u64,
@@ -42,6 +43,9 @@ pub enum EventKind {
         hit_count: u64,
     },
     BPMiss,
+    ContextChange {
+        ctx: u64,
+    },
     Panic,
 }
 
@@ -94,11 +98,12 @@ impl EventKind {
         }
     }
 
-    pub fn sync_start(runtime_cfg: DecoderRuntimeCfg, start_pc: u64, start_prv: Prv) -> Self {
+    pub fn sync_start(runtime_cfg: DecoderRuntimeCfg, start_pc: u64, start_prv: Prv, start_ctx: u64) -> Self {
         EventKind::SyncStart {
             runtime_cfg,
             start_pc,
             start_prv,
+            start_ctx,
         }
     }
 
@@ -116,6 +121,10 @@ impl EventKind {
 
     pub fn bpmiss() -> Self {
         EventKind::BPMiss
+    }
+
+    pub fn context_change(ctx: u64) -> Self {
+        EventKind::ContextChange { ctx }
     }
 
     pub fn panic() -> Self {
@@ -151,6 +160,13 @@ impl EventKind {
     pub fn get_prv_arc(&self) -> Option<(Prv, Prv)> {
         match self {
             EventKind::Trap { prv_arc, .. } => Some(prv_arc.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_ctx(&self) -> Option<u64> {
+        match self {
+            EventKind::ContextChange { ctx } => Some(ctx.clone()),
             _ => None,
         }
     }

@@ -11,7 +11,7 @@ pub enum FHeader {
     FIj = 0b011,   // inferable jump
     FTrap = 0b100, // trapping happened - could be interrupt or exception
     FSync = 0b101, // a synchronization packet
-    FVal = 0b110,  // this packets report a certain value upon request
+    FCtx = 0b110,  // this packets report a context change
     FRes = 0b111,  // reserved for now
 }
 
@@ -24,7 +24,7 @@ impl From<u8> for FHeader {
             0b011 => FHeader::FIj,
             0b100 => FHeader::FTrap,
             0b101 => FHeader::FSync,
-            0b110 => FHeader::FVal,
+            0b110 => FHeader::FCtx,
             0b111 => FHeader::FRes,
             _ => panic!("Invalid FHeader value"),
         }
