@@ -24,6 +24,7 @@ pub struct StackUnwinder {
     pub curr_prv: Prv,
     // current context
     pub curr_ctx: u64,
+    context_changed: bool,
 }
 
 pub struct StackUpdateResult {
@@ -42,6 +43,7 @@ impl StackUnwinder {
             frame_stack: Vec::new(),
             curr_prv: Prv::PrvMachine, // placeholder, will be set by the first sync start event
             curr_ctx: 0, // placeholder, will be set by the first context change event
+            context_changed: false,
         })
     }
 
@@ -93,7 +95,12 @@ impl StackUnwinder {
     }
 
     pub fn step_ctx(&mut self, ctx: u64) -> Option<StackUpdateResult> {
+        if self.curr_ctx == ctx {
+            return None;
+        }
         self.curr_ctx = ctx;
+        // set a sticky bit, so when next time we go back to user-space, clear the stack
+        self.context_changed = true;
         None
     }
 
@@ -129,6 +136,14 @@ impl StackUnwinder {
         loop {
             let frame = self.peek_head_frames();
             if let Some(frame) = frame {
+                // if the stack prv is different, we are done
+                if frame.symbol.prv != self.curr_prv {
+                    return Some(StackUpdateResult {
+                        frames_opened: Vec::new(),
+                        frames_closed: closed,
+                    });
+                }
+                // if the stack addr is within the current function, we are done
                 if let Some((start, end)) = self.func_symbol_map.range(self.curr_prv, self.curr_ctx, frame.addr) {
                     if start <= target && end > target {
                         return Some(StackUpdateResult {
@@ -167,8 +182,19 @@ impl StackUnwinder {
                 }
             }
             TrapReason::Return => {
-                // pop until we find the frame with the same prv as the current prv
                 let mut closed: Vec<Frame> = Vec::new();
+                // if context changed and we are returning to user-space, clear the stack
+                if self.context_changed {
+                    self.context_changed = false;
+                    while let Some(frame) = self.pop_frame() {
+                        closed.push(frame);
+                    }
+                    return Some(StackUpdateResult {
+                            frames_opened: Vec::new(),
+                            frames_closed: closed,
+                    });
+                }
+                // otherwise, pop until we find the frame with the same prv as the current prv
                 loop {
                     let frame = self.peek_head_frames();
                     if let Some(frame) = frame {
@@ -212,5 +238,9 @@ impl StackUnwinder {
         } else {
             Some(self.frame_stack.last().unwrap().clone())
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.frame_stack.is_empty()
     }
 }

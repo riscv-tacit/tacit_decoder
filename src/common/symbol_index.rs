@@ -72,7 +72,8 @@ pub fn build_single_symbol_index(
     // open application elf for symbol processing
     let elf_data = fs::read(&elf_path)?;
     let obj_file = object::File::parse(&*elf_data)?;
-    let loader = Loader::new(&elf_path).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+    debug!("elf_path: {}", elf_path);
+    let loader = Loader::new(&elf_path).map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
 
     // Gather indices of all executable sections
     let exec_secs: std::collections::HashSet<_> = obj_file
@@ -117,10 +118,10 @@ pub fn build_single_symbol_index(
                             if existing.name.trim().is_empty() && !info.name.trim().is_empty() {
                                 *existing = info;
                             } else {
-                                warn!(
-                                    "func_addr 0x{:x} already in map as `{}`, ignoring alias `{}`",
-                                    addr, existing.name, info.name
-                                );
+                                // warn!(
+                                //     "func_addr 0x{:x} already in map as `{}`, ignoring alias `{}`",
+                                //     addr, existing.name, info.name
+                                // );
                             }
                         } else {
                             func_symbol_map.insert(addr + offset, info);
@@ -140,14 +141,17 @@ pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
         let u_func_symbol_map =
             build_single_symbol_index(binary.clone(), Prv::PrvUser, 0, asid.parse::<u64>()?)?;
         u_symbol_maps.insert(asid.parse::<u64>()?, u_func_symbol_map);
+        debug!("u_symbol_maps size: {}", u_symbol_maps.len());
     }
     let mut k_func_symbol_map =
         build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
+    debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
     for (binary, entry) in cfg.driver_binary_entry_tuples {
         let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
         let func_symbol_map =
             build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point, 0)?;
         k_func_symbol_map.extend(func_symbol_map);
+        debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
     }
     let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0 )?;
     Ok(SymbolIndex {

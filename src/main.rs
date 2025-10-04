@@ -351,6 +351,7 @@ fn main() -> Result<()> {
     let frontend_handle = thread::spawn(move || {
         frontend::decoder::decode_trace(
             encoded_trace_path,
+            static_cfg.clone(),
             runtime_cfg.clone(),
             frontend_insn_index,
             bus,

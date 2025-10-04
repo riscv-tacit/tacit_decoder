@@ -12,6 +12,7 @@ use crate::frontend::br_mode::BrMode;
 use crate::frontend::f_header::FHeader;
 use crate::frontend::packet;
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
+use crate::common::static_cfg::DecoderStaticCfg;
 
 use rvdasm::insn::Insn;
 use std::collections::HashMap;
@@ -73,8 +74,18 @@ fn step_bb_until(
     pc
 }
 
+fn find_ctx(ctx: u64, static_cfg: &DecoderStaticCfg) -> bool {
+    for (_, asid) in static_cfg.application_binary_asid_tuples.iter() {
+        if asid.parse::<u64>().unwrap() == ctx {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn decode_trace(
     encoded_trace: String,
+    static_cfg: DecoderStaticCfg,
     runtime_cfg: DecoderRuntimeCfg,
     insn_index: Arc<InstructionIndex>,
     mut bus: Bus<Entry>,
@@ -148,6 +159,26 @@ pub fn decode_trace(
         } else if packet.f_header == FHeader::FCtx {
             assert!(packet.from_ctx == ctx, "from_ctx should be the same as ctx");
             ctx = packet.target_ctx;
+            // if this ctx is not known by the static config, drain packest until the ctx is known
+
+            if !find_ctx(ctx, &static_cfg) {
+                // drain packets until the ctx is known
+                loop {
+                    let packet = match packet::read_packet(&mut trace_reader) {
+                        Ok(pkt) => pkt,
+                        Err(_) => break,
+                    };
+                    packet_count += 1;
+                    if packet.f_header == FHeader::FCtx {
+                        debug!("found ctx packet in draining: {:?}", packet);
+                        if find_ctx(packet.target_ctx, &static_cfg) {
+                            ctx = packet.target_ctx;
+                            break;
+                        }
+                        break;
+                    }
+                }
+            }
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(EventKind::context_change(ctx), timestamp));
             continue;
