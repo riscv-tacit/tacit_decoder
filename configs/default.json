@@ -8,8 +8,8 @@
   "kernel_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin-dwarf",
   "kernel_jump_label_patch_log": "configs/jump_label_patch_map.txt",
   "driver_binary_entry_tuples": [
-    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf-copy", "0xffffffff018be000"],
-    ["../firemarshal/images/firechip/trace-hello/iceblk-dwarf-copy", "0xffffffff018ee000"]
+    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff0169d000"],
+    ["../firemarshal/images/firechip/trace-hello/iceblk-dwarf", "0xffffffff016ac000"]
   ],
   "header_only": false,
   "to_stats": false,
