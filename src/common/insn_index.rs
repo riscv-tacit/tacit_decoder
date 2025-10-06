@@ -173,8 +173,6 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         }
     }
 
-    
-
     Ok(InstructionIndex {
         u_insn_maps,
         k_insn_map,

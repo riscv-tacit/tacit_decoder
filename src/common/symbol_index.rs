@@ -143,15 +143,18 @@ pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
         u_symbol_maps.insert(asid.parse::<u64>()?, u_func_symbol_map);
         debug!("u_symbol_maps size: {}", u_symbol_maps.len());
     }
-    let mut k_func_symbol_map =
-        build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
-    debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
-    for (binary, entry) in cfg.driver_binary_entry_tuples {
-        let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
-        let func_symbol_map =
-            build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point, 0)?;
-        k_func_symbol_map.extend(func_symbol_map);
+    let mut k_func_symbol_map = BTreeMap::new();
+    if cfg.kernel_binary != "" {
+        k_func_symbol_map =
+            build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
         debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
+        for (binary, entry) in cfg.driver_binary_entry_tuples {
+            let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
+            let func_symbol_map =
+                build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point, 0)?;
+            k_func_symbol_map.extend(func_symbol_map);
+            debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
+        }
     }
     let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0 )?;
     Ok(SymbolIndex {

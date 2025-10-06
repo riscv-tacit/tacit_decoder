@@ -6,7 +6,7 @@ pub enum SyncType {
     SyncNone = 0b000,
     SyncStart = 0b001,
     SyncPeriodic = 0b010,
-    SyncEnd = 0b100,
+    SyncEnd = 0b011,
 }
 
 impl From<u8> for SyncType {

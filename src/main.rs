@@ -196,16 +196,16 @@ fn main() -> Result<()> {
             ));
         }
     }
-    if static_cfg.sbi_binary != "" && !Path::new(&static_cfg.sbi_binary).exists()
-        || !Path::new(&static_cfg.sbi_binary).is_file()
+    if static_cfg.sbi_binary != "" && (!Path::new(&static_cfg.sbi_binary).exists()
+        || !Path::new(&static_cfg.sbi_binary).is_file())
     {
         return Err(anyhow::anyhow!(
             "SBI binary file is not valid: {}",
             static_cfg.sbi_binary
         ));
     }
-    if static_cfg.kernel_binary != "" && !Path::new(&static_cfg.kernel_binary).exists()
-        || !Path::new(&static_cfg.kernel_binary).is_file()
+    if static_cfg.kernel_binary != "" && (!Path::new(&static_cfg.kernel_binary).exists()
+        || !Path::new(&static_cfg.kernel_binary).is_file())
     {
         return Err(anyhow::anyhow!(
             "Kernel binary file is not valid: {}",

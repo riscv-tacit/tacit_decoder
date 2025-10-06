@@ -6,7 +6,6 @@ use std::io::{BufReader, Read};
 use crate::common::prv::*;
 use crate::frontend::br_mode::*;
 use crate::frontend::c_header::*;
-use crate::frontend::ctx_mode::*;
 use crate::frontend::f_header::*;
 use crate::frontend::runtime_cfg::*;
 use crate::frontend::sync_type::*;
@@ -206,16 +205,16 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
 
     let (from_prv, target_prv) = read_prv(stream)?;
     packet.from_prv = from_prv;
-    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
+    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser, got {:?}", from_prv);
+    trace!("target_prv: {:?}", target_prv);
     packet.target_prv = target_prv;
     packet.target_ctx = read_varint(stream)?;
+    let runtime_cfg_raw = read_varint(stream)?;
+    let br_mode = BrMode::from((runtime_cfg_raw & BP_MODE_MASK));
+    let bp_entries = ((runtime_cfg_raw & BP_ENTRY_MASK) >> BP_ENTRY_OFFSET) * BP_BASE_VALUE;
+
     packet.target_address = read_varint(stream)?;
     packet.timestamp = read_varint(stream)?;
-
-    let br_mode_raw = read_varint(stream)?;
-    let br_mode = BrMode::from(br_mode_raw);
-
-    let bp_entries = read_varint(stream)?;
 
     Ok((
         packet,
