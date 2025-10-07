@@ -24,7 +24,6 @@ pub struct StackUnwinder {
     pub curr_prv: Prv,
     // current context
     pub curr_ctx: u64,
-    context_changed: bool,
 }
 
 pub struct StackUpdateResult {
@@ -43,7 +42,6 @@ impl StackUnwinder {
             frame_stack: Vec::new(),
             curr_prv: Prv::PrvMachine, // placeholder, will be set by the first sync start event
             curr_ctx: 0, // placeholder, will be set by the first context change event
-            context_changed: false,
         })
     }
 
@@ -78,12 +76,12 @@ impl StackUnwinder {
             } => self.step_sync_start(start_prv, start_ctx),
             EventKind::InferrableJump { arc } => self.step_ij(arc.1),
             EventKind::UninferableJump { arc } => self.step_uj(arc.1),
-            EventKind::ContextChange { ctx } => self.step_ctx(*ctx),
             EventKind::Trap {
                 reason,
                 prv_arc,
                 arc,
-            } => self.step_trap(reason, prv_arc, arc.1),
+                ctx,
+            } => self.step_trap(reason, prv_arc, arc.1, *ctx),
             _ => return None,
         }
     }
@@ -91,16 +89,6 @@ impl StackUnwinder {
     pub fn step_sync_start(&mut self, start_prv: &Prv, start_ctx: &u64) -> Option<StackUpdateResult> {
         self.curr_prv = start_prv.clone();
         self.curr_ctx = start_ctx.clone();
-        None
-    }
-
-    pub fn step_ctx(&mut self, ctx: u64) -> Option<StackUpdateResult> {
-        if self.curr_ctx == ctx {
-            return None;
-        }
-        self.curr_ctx = ctx;
-        // set a sticky bit, so when next time we go back to user-space, clear the stack
-        self.context_changed = true;
         None
     }
 
@@ -167,6 +155,7 @@ impl StackUnwinder {
         reason: &TrapReason,
         prv_arc: &(Prv, Prv),
         to_addr: u64,
+        ctx: Option<u64>,
     ) -> Option<StackUpdateResult> {
         self.curr_prv = prv_arc.1;
         match reason {
@@ -184,11 +173,12 @@ impl StackUnwinder {
             TrapReason::Return => {
                 let mut closed: Vec<Frame> = Vec::new();
                 // if context changed and we are returning to user-space, clear the stack
-                if self.context_changed {
-                    self.context_changed = false;
+                if self.curr_prv == Prv::PrvUser && 
+                    ctx.is_some() && ctx.unwrap() != self.curr_ctx {
                     while let Some(frame) = self.pop_frame() {
                         closed.push(frame);
                     }
+                    self.curr_ctx = ctx.unwrap();
                     return Some(StackUpdateResult {
                             frames_opened: Vec::new(),
                             frames_closed: closed,

@@ -10,6 +10,7 @@ use crate::common::prv::Prv;
 use crate::frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use crate::frontend::br_mode::BrMode;
 use crate::frontend::f_header::FHeader;
+use crate::frontend::trap_type::TrapType;
 use crate::frontend::packet;
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use crate::common::static_cfg::DecoderStaticCfg;
@@ -145,44 +146,33 @@ pub fn decode_trace(
             };
             let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
             timestamp += packet.timestamp;
-            bus.broadcast(Entry::event(
-                EventKind::trap(
-                    TrapReason::from(trap_type),
-                    (prv, packet.target_prv),
-                    (pc, new_pc),
-                ),
-                timestamp,
-            ));
+            let report_ctx = trap_type == TrapType::TReturn && packet.target_prv == Prv::PrvUser;
+            if report_ctx {
+                ctx = packet.target_ctx;
+                bus.broadcast(Entry::event(
+                    EventKind::trap_with_ctx(
+                        TrapReason::from(trap_type),
+                        (prv, packet.target_prv),
+                        (pc, new_pc),
+                        packet.target_ctx,
+                    ),
+                    timestamp,
+                ));
+            } else {
+                bus.broadcast(Entry::event(
+                    EventKind::trap(
+                        TrapReason::from(trap_type),
+                        (prv, packet.target_prv),
+                        (pc, new_pc)
+                    ),
+                    timestamp,
+                ));
+            }
             prv = packet.target_prv;
+
             pc = new_pc;
             continue;
-        } else if packet.f_header == FHeader::FCtx {
-            assert!(packet.from_ctx == ctx, "from_ctx should be the same as ctx");
-            ctx = packet.target_ctx;
-            // if this ctx is not known by the static config, drain packest until the ctx is known
-
-            if !find_ctx(ctx, &static_cfg) {
-                // drain packets until the ctx is known
-                loop {
-                    let packet = match packet::read_packet(&mut trace_reader) {
-                        Ok(pkt) => pkt,
-                        Err(_) => break,
-                    };
-                    packet_count += 1;
-                    if packet.f_header == FHeader::FCtx {
-                        debug!("found ctx packet in draining: {:?}", packet);
-                        if find_ctx(packet.target_ctx, &static_cfg) {
-                            ctx = packet.target_ctx;
-                            break;
-                        }
-                        break;
-                    }
-                }
-            }
-            timestamp += packet.timestamp;
-            bus.broadcast(Entry::event(EventKind::context_change(ctx), timestamp));
-            continue;
-        }
+        } 
 
         if mode_is_predict && packet.f_header == FHeader::FTb {
             // predicted hit with hit-count = packet.timestamp

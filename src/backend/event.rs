@@ -28,6 +28,7 @@ pub enum EventKind {
         reason: TrapReason,
         prv_arc: (Prv, Prv),
         arc: (u64, u64),
+        ctx: Option<u64>,
     },
     SyncStart {
         runtime_cfg: DecoderRuntimeCfg,
@@ -95,6 +96,16 @@ impl EventKind {
             reason,
             prv_arc,
             arc,
+            ctx: None,
+        }
+    }
+
+    pub fn trap_with_ctx(reason: TrapReason, prv_arc: (Prv, Prv), arc: (u64, u64), ctx: u64) -> Self {
+        EventKind::Trap {
+            reason,
+            prv_arc,
+            arc,
+            ctx: Some(ctx),
         }
     }
 

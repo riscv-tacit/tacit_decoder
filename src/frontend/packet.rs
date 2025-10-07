@@ -39,7 +39,7 @@ impl Packet {
         Packet {
             is_compressed: false,
             c_header: CHeader::CNa,
-            f_header: FHeader::FRes,
+            f_header: FHeader::FRes1,
             func3: SubFunc3::None,
             target_address: 0,
             from_address: 0,
@@ -143,15 +143,11 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     let (from_prv, target_prv) = read_prv(stream)?;
                     packet.from_prv = from_prv;
                     packet.target_prv = target_prv;
+                    if trap_type == TrapType::TReturn && target_prv == Prv::PrvUser {
+                        packet.target_ctx = read_varint(stream)?;
+                    }
                     packet.target_address = read_varint(stream)?;
                     packet.from_address = read_varint(stream)?;
-                    packet.timestamp = read_varint(stream)?;
-                    packet.f_header = f_header;
-                    packet.c_header = CHeader::CNa;
-                }
-                FHeader::FCtx => {
-                    packet.from_ctx = read_varint(stream)?;
-                    packet.target_ctx = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
@@ -209,9 +205,9 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
     trace!("target_prv: {:?}", target_prv);
     packet.target_prv = target_prv;
     packet.target_ctx = read_varint(stream)?;
-    let runtime_cfg_raw = read_varint(stream)?;
-    let br_mode = BrMode::from((runtime_cfg_raw & BP_MODE_MASK));
-    let bp_entries = ((runtime_cfg_raw & BP_ENTRY_MASK) >> BP_ENTRY_OFFSET) * BP_BASE_VALUE;
+    let runtime_cfg_raw = read_u8(stream)?;
+    let br_mode = BrMode::from((runtime_cfg_raw & BP_MODE_MASK) as u64);
+    let bp_entries = ((runtime_cfg_raw & BP_ENTRY_MASK) >> BP_ENTRY_OFFSET) as u64 * BP_BASE_VALUE;
 
     packet.target_address = read_varint(stream)?;
     packet.timestamp = read_varint(stream)?;
