@@ -3,7 +3,7 @@ use bus::Bus;
 use log::{debug, trace};
 use std::fs::File;
 use std::io::{BufReader, Seek};
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::backend::event::{Entry, EventKind, TrapReason};
 use crate::common::insn_index::InstructionIndex;
@@ -98,6 +98,7 @@ pub fn decode_trace(
     // get the file size
     let trace_file_size = trace_file.metadata()?.len();
     let progress_bar = ProgressBar::new(trace_file_size);
+    progress_bar.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")?);
 
     let mut trace_reader = BufReader::new(trace_file);
     let (first_packet, first_runtime_cfg) = packet::read_first_packet(&mut trace_reader)?;
