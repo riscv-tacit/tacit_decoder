@@ -5,6 +5,7 @@ extern crate gcno_reader;
 extern crate log;
 extern crate object;
 extern crate rvdasm;
+extern crate indicatif;
 
 mod frontend {
     pub mod bp_double_saturating_counter;

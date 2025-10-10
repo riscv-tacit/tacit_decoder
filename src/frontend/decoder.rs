@@ -2,7 +2,8 @@ use anyhow::Result;
 use bus::Bus;
 use log::{debug, trace};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Seek};
+use indicatif::ProgressBar;
 
 use crate::backend::event::{Entry, EventKind, TrapReason};
 use crate::common::insn_index::InstructionIndex;
@@ -93,6 +94,11 @@ pub fn decode_trace(
 ) -> Result<()> {
     // Open and parse the first packet (SyncStart)
     let trace_file = File::open(encoded_trace.clone())?;
+
+    // get the file size
+    let trace_file_size = trace_file.metadata()?.len();
+    let progress_bar = ProgressBar::new(trace_file_size);
+
     let mut trace_reader = BufReader::new(trace_file);
     let (first_packet, first_runtime_cfg) = packet::read_first_packet(&mut trace_reader)?;
 
@@ -116,6 +122,9 @@ pub fn decode_trace(
             Ok(pkt) => pkt,
             Err(_) => break,
         };
+        let current_position = trace_reader.stream_position()?;
+        progress_bar.set_position(current_position);
+
         debug!("packet: {:?}", packet);
         packet_count += 1;
 

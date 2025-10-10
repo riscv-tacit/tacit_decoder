@@ -25,3 +25,4 @@ gcno_reader = { path = "crates/gcno_reader" }
 addr2line = "0.24.2"
 indexmap = "2.7.0"
 jsonschema = "0.17"
+indicatif = "0.18.0"
