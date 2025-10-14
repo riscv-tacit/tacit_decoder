@@ -100,7 +100,12 @@ impl EventKind {
         }
     }
 
-    pub fn trap_with_ctx(reason: TrapReason, prv_arc: (Prv, Prv), arc: (u64, u64), ctx: u64) -> Self {
+    pub fn trap_with_ctx(
+        reason: TrapReason,
+        prv_arc: (Prv, Prv),
+        arc: (u64, u64),
+        ctx: u64,
+    ) -> Self {
         EventKind::Trap {
             reason,
             prv_arc,
@@ -109,7 +114,12 @@ impl EventKind {
         }
     }
 
-    pub fn sync_start(runtime_cfg: DecoderRuntimeCfg, start_pc: u64, start_prv: Prv, start_ctx: u64) -> Self {
+    pub fn sync_start(
+        runtime_cfg: DecoderRuntimeCfg,
+        start_pc: u64,
+        start_prv: Prv,
+        start_ctx: u64,
+    ) -> Self {
         EventKind::SyncStart {
             runtime_cfg,
             start_pc,

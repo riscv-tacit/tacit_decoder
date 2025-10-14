@@ -11,8 +11,8 @@ pub enum FHeader {
     FIj = 0b011,   // inferable jump
     FTrap = 0b100, // trapping happened - could be interrupt or exception
     FSync = 0b101, // a synchronization packet
-    FRes1 = 0b110,  // this packets report a context change
-    FRes2 = 0b111,  // reserved for now
+    FRes1 = 0b110, // this packets report a context change
+    FRes2 = 0b111, // reserved for now
 }
 
 impl From<u8> for FHeader {

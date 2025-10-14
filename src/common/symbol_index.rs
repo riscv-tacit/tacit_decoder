@@ -73,7 +73,8 @@ pub fn build_single_symbol_index(
     let elf_data = fs::read(&elf_path)?;
     let obj_file = object::File::parse(&*elf_data)?;
     debug!("elf_path: {}", elf_path);
-    let loader = Loader::new(&elf_path).map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
+    let loader = Loader::new(&elf_path)
+        .map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
 
     // Gather indices of all executable sections
     let exec_secs: std::collections::HashSet<_> = obj_file
@@ -150,13 +151,18 @@ pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
         debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
         for (binary, entry) in cfg.driver_binary_entry_tuples {
             let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
-            let func_symbol_map =
-                build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point, 0)?;
+            let func_symbol_map = build_single_symbol_index(
+                binary.clone(),
+                Prv::PrvSupervisor,
+                driver_entry_point,
+                0,
+            )?;
             k_func_symbol_map.extend(func_symbol_map);
             debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
         }
     }
-    let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0 )?;
+    let m_func_symbol_map =
+        build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0)?;
     Ok(SymbolIndex {
         u_symbol_map: u_symbol_maps,
         k_symbol_map: k_func_symbol_map,

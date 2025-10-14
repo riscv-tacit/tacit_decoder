@@ -41,7 +41,7 @@ impl StackUnwinder {
             insn_map: insn_index,
             frame_stack: Vec::new(),
             curr_prv: Prv::PrvMachine, // placeholder, will be set by the first sync start event
-            curr_ctx: 0, // placeholder, will be set by the first context change event
+            curr_ctx: 0,               // placeholder, will be set by the first context change event
         })
     }
 
@@ -86,7 +86,11 @@ impl StackUnwinder {
         }
     }
 
-    pub fn step_sync_start(&mut self, start_prv: &Prv, start_ctx: &u64) -> Option<StackUpdateResult> {
+    pub fn step_sync_start(
+        &mut self,
+        start_prv: &Prv,
+        start_ctx: &u64,
+    ) -> Option<StackUpdateResult> {
         self.curr_prv = start_prv.clone();
         self.curr_ctx = start_ctx.clone();
         None
@@ -107,7 +111,10 @@ impl StackUnwinder {
 
     pub fn step_uj(&mut self, to_addr: u64) -> Option<StackUpdateResult> {
         let target = to_addr;
-        if let Some((start, _)) = self.func_symbol_map.range(self.curr_prv, self.curr_ctx, target) {
+        if let Some((start, _)) = self
+            .func_symbol_map
+            .range(self.curr_prv, self.curr_ctx, target)
+        {
             if start == target {
                 if let Some(frame) = self.push_frame(self.curr_prv, self.curr_ctx, target) {
                     return Some(StackUpdateResult {
@@ -132,7 +139,10 @@ impl StackUnwinder {
                     });
                 }
                 // if the stack addr is within the current function, we are done
-                if let Some((start, end)) = self.func_symbol_map.range(self.curr_prv, self.curr_ctx, frame.addr) {
+                if let Some((start, end)) =
+                    self.func_symbol_map
+                        .range(self.curr_prv, self.curr_ctx, frame.addr)
+                {
                     if start <= target && end > target {
                         return Some(StackUpdateResult {
                             frames_opened: Vec::new(),
@@ -173,15 +183,14 @@ impl StackUnwinder {
             TrapReason::Return => {
                 let mut closed: Vec<Frame> = Vec::new();
                 // if context changed and we are returning to user-space, clear the stack
-                if self.curr_prv == Prv::PrvUser && 
-                    ctx.is_some() && ctx.unwrap() != self.curr_ctx {
+                if self.curr_prv == Prv::PrvUser && ctx.is_some() && ctx.unwrap() != self.curr_ctx {
                     while let Some(frame) = self.pop_frame() {
                         closed.push(frame);
                     }
                     self.curr_ctx = ctx.unwrap();
                     return Some(StackUpdateResult {
-                            frames_opened: Vec::new(),
-                            frames_closed: closed,
+                        frames_opened: Vec::new(),
+                        frames_closed: closed,
                     });
                 }
                 // otherwise, pop until we find the frame with the same prv as the current prv

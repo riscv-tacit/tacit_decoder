@@ -30,7 +30,11 @@ struct Lookup {
 impl Lookup {
     fn lookup(&self, prv: Prv, ctx: u64, addr: u64) -> Option<u32> {
         match prv {
-            Prv::PrvUser => self.u_lookup.get(&ctx).and_then(|lookup| lookup.get(&addr)).copied(),
+            Prv::PrvUser => self
+                .u_lookup
+                .get(&ctx)
+                .and_then(|lookup| lookup.get(&addr))
+                .copied(),
             Prv::PrvSupervisor => self.k_lookup.get(&addr).copied(),
             Prv::PrvMachine => self.m_lookup.get(&addr).copied(),
             _ => panic!("Unsupported privilege level: {:?}", prv),
@@ -105,7 +109,9 @@ impl SpeedscopeReceiver {
     }
 
     fn lookup_frame(&self, frame: &Frame) -> Option<u32> {
-        let id = self.frame_lookup.lookup(frame.symbol.prv, frame.symbol.ctx, frame.addr);
+        let id = self
+            .frame_lookup
+            .lookup(frame.symbol.prv, frame.symbol.ctx, frame.addr);
         id
     }
 }
@@ -180,8 +186,6 @@ impl AbstractReceiver for SpeedscopeReceiver {
     }
 }
 
-
-
 /// Build Speedscope frames and an address→frame-id lookup.
 fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
     let mut frames = Vec::new();
@@ -196,7 +200,7 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
             "file": info.src.file,
             "line": info.src.lines,
         }));
-        k_lookup.insert( addr, id);
+        k_lookup.insert(addr, id);
     }
 
     for (&addr, info) in symbols.get(Prv::PrvMachine, 0).iter() {
@@ -206,7 +210,7 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
             "file": info.src.file,
             "line": info.src.lines,
         }));
-        m_lookup.insert( addr, id);
+        m_lookup.insert(addr, id);
     }
     // iterate over the user space symbol map
     for (&asid, user_symbol_map) in symbols.get_user_symbol_map().iter() {
@@ -218,7 +222,7 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
                 "file": info.src.file,
                 "line": info.src.lines,
             }));
-            u_lookup.insert( addr, id);
+            u_lookup.insert(addr, id);
         }
         u_lookups.insert(asid, u_lookup);
     }

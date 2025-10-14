@@ -1,7 +1,7 @@
 use crate::common::prv::*;
 use crate::common::static_cfg::DecoderStaticCfg;
 use anyhow::Result;
-use log::debug;
+use log::{debug, trace};
 use object::elf::SHF_EXECINSTR;
 use object::{Object, ObjectSection};
 use rvdasm::disassembler::*;
@@ -156,7 +156,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
             );
             k_insn_map.extend(driver_insn_map);
         }
-        
+
         // Apply kernel jump label patch log
         if cfg.kernel_jump_label_patch_log != "" {
             let jump_label_patch_log = File::open(cfg.kernel_jump_label_patch_log)?;
@@ -166,8 +166,18 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
                 let parts = line.split(',').collect::<Vec<&str>>();
                 let addr = u64::from_str_radix(parts[0], 16)?;
                 let raw_insn = u32::from_str_radix(parts[1], 16)?;
-                let new_insn = dasm.disassmeble_one(raw_insn).unwrap();
-                k_insn_map.insert(addr, new_insn);
+                // trace!("patching kernel-space instruction at {:#x} with {:#x}", addr, raw_insn);
+                let new_insn = dasm.disassmeble_one(raw_insn);
+                if let Some(new_insn) = new_insn {
+                    k_insn_map.insert(addr, new_insn);
+                } else {
+                    trace!(
+                        "error disassembling instruction at {:#x}: {:#x}",
+                        addr,
+                        raw_insn
+                    );
+                    continue;
+                }
             }
             debug!("[insn_index] patched kernel-space instructions");
         }

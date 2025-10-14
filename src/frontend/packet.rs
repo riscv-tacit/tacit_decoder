@@ -146,8 +146,8 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
                     if trap_type == TrapType::TReturn && target_prv == Prv::PrvUser {
                         packet.target_ctx = read_varint(stream)?;
                     }
-                    packet.target_address = read_varint(stream)?;
                     packet.from_address = read_varint(stream)?;
+                    packet.target_address = read_varint(stream)?;
                     packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
@@ -201,7 +201,11 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
 
     let (from_prv, target_prv) = read_prv(stream)?;
     packet.from_prv = from_prv;
-    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser, got {:?}", from_prv);
+    assert!(
+        from_prv == Prv::PrvUser,
+        "from_prv should be PrvUser, got {:?}",
+        from_prv
+    );
     trace!("target_prv: {:?}", target_prv);
     packet.target_prv = target_prv;
     packet.target_ctx = read_varint(stream)?;

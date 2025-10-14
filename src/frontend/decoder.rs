@@ -1,27 +1,85 @@
 use anyhow::Result;
 use bus::Bus;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, trace};
 use std::fs::File;
 use std::io::{BufReader, Seek};
-use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::backend::event::{Entry, EventKind, TrapReason};
 use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
+use crate::common::static_cfg::DecoderStaticCfg;
 use crate::frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use crate::frontend::br_mode::BrMode;
 use crate::frontend::f_header::FHeader;
-use crate::frontend::trap_type::TrapType;
 use crate::frontend::packet;
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
-use crate::common::static_cfg::DecoderStaticCfg;
+use crate::frontend::trap_type::TrapType;
 
 use rvdasm::insn::Insn;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+const ADDR_BITS: u64 = 64;
+const ADDR_MASK: u64 = if ADDR_BITS == 64 { 0xffffffffffffffff } else { (1 << ADDR_BITS) - 1 };
+const ADDR_EXTENDER_BITS: u64 = 64 - ADDR_BITS;
+const SIGNED_ADDR_EXTENDER_MASK: u64 = if ADDR_EXTENDER_BITS == 64 { 0x0 } else { (1 << ADDR_EXTENDER_BITS) - 1 };
+const UNSIGNED_ADDR_EXTENDER_MASK: u64 = 0x0;
+
+struct PC {
+    addr: u64,
+}
+
+impl PC {
+    fn new(unshifted_addr: u64) -> Self {
+        Self {
+            addr: unshifted_addr << 1,
+        }
+    }
+
+    fn compute_from_xored_target_addr(&mut self, target_addr: u64) -> u64 {
+        let refunded_delta = target_addr << 1;
+        trace!(
+            "refunded_delta {:x}, current pc: {:x}",
+            refunded_delta,
+            self.addr
+        );
+        let xored_addr = (self.addr & ADDR_MASK) ^ refunded_delta;
+        trace!("xored_addr: {:x}", xored_addr);
+        xored_addr
+    }
+
+    fn get_addr(&self) -> u64 {
+        // sign extend by the 40th bit
+        let sign_bit = self.addr >> (ADDR_BITS - 1);
+        let extender = if sign_bit == 1 {
+            SIGNED_ADDR_EXTENDER_MASK
+        } else {
+            UNSIGNED_ADDR_EXTENDER_MASK
+        };
+        let extended_addr = self.addr | if ADDR_BITS == 64 { 0x0 } else { extender << ADDR_BITS };
+        extended_addr
+    }
+
+    fn set_addr(&mut self, addr: u64) {
+        self.addr = addr;
+    }
+}
+
 fn refund_addr(addr: u64) -> u64 {
-    addr << 1
+    let shifted_addr = addr << 1;
+    // sign extend by the 40th bit
+    let sign_bit = shifted_addr >> 39;
+    trace!("sign_bit of addr: {:x} is {:x}", shifted_addr, sign_bit);
+    let extender = if sign_bit == 1 {
+        SIGNED_ADDR_EXTENDER_MASK
+    } else {
+        UNSIGNED_ADDR_EXTENDER_MASK
+    };
+    let extended_addr = shifted_addr | (extender << 40);
+    trace!("extended_addr: {:x}", extended_addr);
+    extended_addr
+    // extended_addr << 1
 }
 
 // step until encountering a br/jump
@@ -109,12 +167,12 @@ pub fn decode_trace(
 
     // initial state from first packet
     let mut packet_count = 0u64;
-    let mut pc = refund_addr(first_packet.target_address);
+    let mut pc = PC::new(first_packet.target_address);
     let mut timestamp = first_packet.timestamp;
     let mut prv = first_packet.target_prv;
     let mut ctx = first_packet.target_ctx;
     bus.broadcast(Entry::event(
-        EventKind::sync_start(first_runtime_cfg, pc, prv, ctx),
+        EventKind::sync_start(first_runtime_cfg, pc.get_addr(), prv, ctx),
         first_packet.timestamp,
     ));
 
@@ -133,18 +191,22 @@ pub fn decode_trace(
         let get_insn_map = |p: Prv, ctx: u64| -> &HashMap<u64, Insn> { insn_index.get(p, ctx) };
 
         if packet.f_header == FHeader::FSync {
-            pc = step_bb_until(
-                pc,
+            let new_pc = step_bb_until(
+                pc.get_addr(),
                 get_insn_map(prv, ctx),
                 refund_addr(packet.target_address),
                 &mut bus,
             );
-            bus.broadcast(Entry::event(EventKind::sync_end(pc), packet.timestamp));
+            pc.set_addr(new_pc);
+            bus.broadcast(Entry::event(
+                EventKind::sync_end(pc.get_addr()),
+                packet.timestamp,
+            ));
             break;
         } else if packet.f_header == FHeader::FTrap {
             // step until the trap's from_address (previous insn)
-            pc = step_bb_until(
-                pc,
+            let new_pc = step_bb_until(
+                pc.get_addr(),
                 get_insn_map(prv, ctx),
                 refund_addr(packet.from_address),
                 &mut bus,
@@ -154,16 +216,14 @@ pub fn decode_trace(
                 crate::frontend::packet::SubFunc3::TrapType(t) => t,
                 _ => unreachable!(),
             };
-            let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
             timestamp += packet.timestamp;
             let report_ctx = trap_type == TrapType::TReturn && packet.target_prv == Prv::PrvUser;
             if report_ctx {
-                ctx = packet.target_ctx;
                 bus.broadcast(Entry::event(
                     EventKind::trap_with_ctx(
                         TrapReason::from(trap_type),
                         (prv, packet.target_prv),
-                        (pc, new_pc),
+                        (pc.get_addr(), new_pc),
                         packet.target_ctx,
                     ),
                     timestamp,
@@ -173,16 +233,18 @@ pub fn decode_trace(
                     EventKind::trap(
                         TrapReason::from(trap_type),
                         (prv, packet.target_prv),
-                        (pc, new_pc)
+                        (pc.get_addr(), new_pc),
                     ),
                     timestamp,
                 ));
             }
             prv = packet.target_prv;
-
-            pc = new_pc;
+            pc.set_addr(new_pc);
+            let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
+            pc.set_addr(new_pc);
+            trace!("new set pc: {:x}", pc.get_addr());
             continue;
-        } 
+        }
 
         if mode_is_predict && packet.f_header == FHeader::FTb {
             // predicted hit with hit-count = packet.timestamp
@@ -191,66 +253,71 @@ pub fn decode_trace(
                 packet.timestamp,
             ));
             for _ in 0..packet.timestamp {
-                pc = step_bb(pc, get_insn_map(prv, ctx), &mut bus, &br_mode);
-                let insn_to_resolve = get_insn_map(prv, ctx).get(&pc).unwrap();
+                let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
+                pc.set_addr(new_pc);
+                let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();
                 if !insn_to_resolve.is_branch() {
                     bus.broadcast(Entry::event(EventKind::panic(), 0));
-                    panic!("pc: {:x}, insn: {:?}", pc, insn_to_resolve);
+                    panic!("pc: {:x}, insn: {:?}", pc.get_addr(), insn_to_resolve);
                 }
-                let taken = bp_counter.predict(pc, true);
+                let taken = bp_counter.predict(pc.get_addr(), true);
                 if taken {
-                    let new_pc = (pc as i64
+                    let new_pc = (pc.get_addr() as i64
                         + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
                         as u64;
                     bus.broadcast(Entry::event(
-                        EventKind::taken_branch((pc, new_pc)),
+                        EventKind::taken_branch((pc.get_addr(), new_pc)),
                         timestamp,
                     ));
-                    pc = new_pc;
+                    pc.set_addr(new_pc);
                 } else {
-                    let new_pc = pc + insn_to_resolve.len as u64;
+                    let new_pc = pc.get_addr() + insn_to_resolve.len as u64;
                     bus.broadcast(Entry::event(
-                        EventKind::non_taken_branch((pc, new_pc)),
+                        EventKind::non_taken_branch((pc.get_addr(), new_pc)),
                         timestamp,
                     ));
-                    pc = new_pc;
+                    pc.set_addr(new_pc);
                 }
             }
         } else if mode_is_predict && packet.f_header == FHeader::FNt {
             // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(EventKind::bpmiss(), timestamp));
-            pc = step_bb(pc, get_insn_map(prv, ctx), &mut bus, &br_mode);
-            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc).unwrap();
+            let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
+            pc.set_addr(new_pc);
+            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();
             if !insn_to_resolve.is_branch() {
                 bus.broadcast(Entry::event(EventKind::panic(), 0));
                 panic!(
                     "pc: {:x}, timestamp: {}, insn: {:?}",
-                    pc, timestamp, insn_to_resolve
+                    pc.get_addr(),
+                    timestamp,
+                    insn_to_resolve
                 );
             }
-            let taken = bp_counter.predict(pc, false);
+            let taken = bp_counter.predict(pc.get_addr(), false);
             if !taken {
-                let new_pc = (pc as i64
+                let new_pc = (pc.get_addr() as i64
                     + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
                     as u64;
                 bus.broadcast(Entry::event(
-                    EventKind::taken_branch((pc, new_pc)),
+                    EventKind::taken_branch((pc.get_addr(), new_pc)),
                     timestamp,
                 ));
-                pc = new_pc;
+                pc.set_addr(new_pc);
             } else {
-                let new_pc = pc + insn_to_resolve.len as u64;
+                let new_pc = pc.get_addr() + insn_to_resolve.len as u64;
                 bus.broadcast(Entry::event(
-                    EventKind::non_taken_branch((pc, new_pc)),
+                    EventKind::non_taken_branch((pc.get_addr(), new_pc)),
                     timestamp,
                 ));
-                pc = new_pc;
+                pc.set_addr(new_pc);
             }
         } else {
             // branch target mode
-            pc = step_bb(pc, get_insn_map(prv, ctx), &mut bus, &br_mode);
-            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc).unwrap();
+            let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
+            pc.set_addr(new_pc);
+            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();
             timestamp += packet.timestamp;
             match packet.f_header {
                 FHeader::FTb => {
@@ -258,64 +325,72 @@ pub fn decode_trace(
                         bus.broadcast(Entry::event(EventKind::panic(), 0));
                         panic!(
                             "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
+                            pc.get_addr(),
+                            timestamp,
+                            insn_to_resolve
                         );
                     }
-                    let new_pc = (pc as i64
+                    let new_pc = (pc.get_addr() as i64
                         + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
                         as u64;
                     bus.broadcast(Entry::event(
-                        EventKind::taken_branch((pc, new_pc)),
+                        EventKind::taken_branch((pc.get_addr(), new_pc)),
                         timestamp,
                     ));
-                    pc = new_pc;
+                    pc.set_addr(new_pc);
                 }
                 FHeader::FNt => {
                     if !insn_to_resolve.is_branch() {
                         bus.broadcast(Entry::event(EventKind::panic(), 0));
                         panic!(
                             "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
+                            pc.get_addr(),
+                            timestamp,
+                            insn_to_resolve
                         );
                     }
-                    let new_pc = pc + insn_to_resolve.len as u64;
+                    let new_pc = pc.get_addr() + insn_to_resolve.len as u64;
                     bus.broadcast(Entry::event(
-                        EventKind::non_taken_branch((pc, new_pc)),
+                        EventKind::non_taken_branch((pc.get_addr(), new_pc)),
                         timestamp,
                     ));
-                    pc = new_pc;
+                    pc.set_addr(new_pc);
                 }
                 FHeader::FIj => {
                     if !insn_to_resolve.is_direct_jump() {
                         bus.broadcast(Entry::event(EventKind::panic(), 0));
                         panic!(
                             "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
+                            pc.get_addr(),
+                            timestamp,
+                            insn_to_resolve
                         );
                     }
-                    let new_pc = (pc as i64
+                    let new_pc = (pc.get_addr() as i64
                         + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
                         as u64;
                     bus.broadcast(Entry::event(
-                        EventKind::inferrable_jump((pc, new_pc)),
+                        EventKind::inferrable_jump((pc.get_addr(), new_pc)),
                         timestamp,
                     ));
-                    pc = new_pc;
+                    pc.set_addr(new_pc);
                 }
                 FHeader::FUj => {
                     if !insn_to_resolve.is_indirect_jump() {
                         bus.broadcast(Entry::event(EventKind::panic(), 0));
                         panic!(
                             "pc: {:x}, timestamp: {}, insn: {:?}",
-                            pc, timestamp, insn_to_resolve
+                            pc.get_addr(),
+                            timestamp,
+                            insn_to_resolve
                         );
                     }
-                    let new_pc = refund_addr(packet.target_address ^ (pc >> 1));
+                    let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
                     bus.broadcast(Entry::event(
-                        EventKind::uninferable_jump((pc, new_pc)),
+                        EventKind::uninferable_jump((pc.get_addr(), new_pc)),
                         timestamp,
                     ));
-                    pc = new_pc;
+                    pc.set_addr(new_pc);
                 }
                 _ => {
                     bus.broadcast(Entry::event(EventKind::panic(), 0));
