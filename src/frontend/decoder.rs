@@ -20,7 +20,8 @@ use rvdasm::insn::Insn;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const ADDR_BITS: u64 = 64;
+// const ADDR_BITS: u64 = 64;
+const ADDR_BITS: u64 = 40;
 const ADDR_MASK: u64 = if ADDR_BITS == 64 { 0xffffffffffffffff } else { (1 << ADDR_BITS) - 1 };
 const ADDR_EXTENDER_BITS: u64 = 64 - ADDR_BITS;
 const SIGNED_ADDR_EXTENDER_MASK: u64 = if ADDR_EXTENDER_BITS == 64 { 0x0 } else { (1 << ADDR_EXTENDER_BITS) - 1 };
@@ -68,16 +69,13 @@ impl PC {
 
 fn refund_addr(addr: u64) -> u64 {
     let shifted_addr = addr << 1;
-    // sign extend by the 40th bit
     let sign_bit = shifted_addr >> 39;
-    trace!("sign_bit of addr: {:x} is {:x}", shifted_addr, sign_bit);
     let extender = if sign_bit == 1 {
         SIGNED_ADDR_EXTENDER_MASK
     } else {
         UNSIGNED_ADDR_EXTENDER_MASK
     };
     let extended_addr = shifted_addr | (extender << 40);
-    trace!("extended_addr: {:x}", extended_addr);
     extended_addr
     // extended_addr << 1
 }
@@ -156,7 +154,7 @@ pub fn decode_trace(
     // get the file size
     let trace_file_size = trace_file.metadata()?.len();
     let progress_bar = ProgressBar::new(trace_file_size);
-    progress_bar.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")?);
+    progress_bar.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/green}] {bytes}/{total_bytes} ({eta})")?);
 
     let mut trace_reader = BufReader::new(trace_file);
     let (first_packet, first_runtime_cfg) = packet::read_first_packet(&mut trace_reader)?;
@@ -171,6 +169,7 @@ pub fn decode_trace(
     let mut timestamp = first_packet.timestamp;
     let mut prv = first_packet.target_prv;
     let mut ctx = first_packet.target_ctx;
+    let mut u_unknown_ctx = false;
     bus.broadcast(Entry::event(
         EventKind::sync_start(first_runtime_cfg, pc.get_addr(), prv, ctx),
         first_packet.timestamp,
@@ -205,12 +204,17 @@ pub fn decode_trace(
             break;
         } else if packet.f_header == FHeader::FTrap {
             // step until the trap's from_address (previous insn)
-            let new_pc = step_bb_until(
-                pc.get_addr(),
-                get_insn_map(prv, ctx),
-                refund_addr(packet.from_address),
-                &mut bus,
-            );
+            // only step if we are in a known ctx
+            let trapping_pc = refund_addr(packet.from_address);
+            if !(u_unknown_ctx && prv == Prv::PrvUser) {
+                let new_pc = step_bb_until(
+                    pc.get_addr(),
+                    get_insn_map(prv, ctx),
+                    trapping_pc,
+                    &mut bus,
+                );
+                assert!(new_pc == trapping_pc, "new_pc: {:x}, trapping_pc: {:x}", new_pc, trapping_pc);
+            }
             // trap event
             let trap_type = match packet.func3 {
                 crate::frontend::packet::SubFunc3::TrapType(t) => t,
@@ -219,11 +223,17 @@ pub fn decode_trace(
             timestamp += packet.timestamp;
             let report_ctx = trap_type == TrapType::TReturn && packet.target_prv == Prv::PrvUser;
             if report_ctx {
+                if find_ctx(packet.target_ctx, &static_cfg) {
+                    ctx = packet.target_ctx;
+                    u_unknown_ctx = false; // we now are in a known ctx
+                } else {
+                    u_unknown_ctx = true; // we are in an unknown ctx
+                }
                 bus.broadcast(Entry::event(
                     EventKind::trap_with_ctx(
                         TrapReason::from(trap_type),
                         (prv, packet.target_prv),
-                        (pc.get_addr(), new_pc),
+                        (pc.get_addr(), trapping_pc),
                         packet.target_ctx,
                     ),
                     timestamp,
@@ -233,13 +243,14 @@ pub fn decode_trace(
                     EventKind::trap(
                         TrapReason::from(trap_type),
                         (prv, packet.target_prv),
-                        (pc.get_addr(), new_pc),
+                        (pc.get_addr(), trapping_pc),
                     ),
                     timestamp,
                 ));
             }
+            trace!("u_unknown_ctx: {}, ctx: {}", u_unknown_ctx, ctx);
             prv = packet.target_prv;
-            pc.set_addr(new_pc);
+            pc.set_addr(trapping_pc);
             let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
             pc.set_addr(new_pc);
             trace!("new set pc: {:x}", pc.get_addr());
@@ -315,6 +326,13 @@ pub fn decode_trace(
             }
         } else {
             // branch target mode
+            // if we're in unknown ctx and we are in user priv, we should ingnore such packet
+            if u_unknown_ctx && prv == Prv::PrvUser {
+                timestamp += packet.timestamp;
+                trace!("ignoring packet in unknown ctx");
+                continue;
+            } 
+            // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
             let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
             pc.set_addr(new_pc);
             let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();

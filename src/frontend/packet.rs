@@ -64,11 +64,10 @@ const VAR_OFFSET: u8 = 7;
 const VAR_VAL_MASK: u8 = 0b0111_1111;
 
 fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
-    trace!("reading varint");
     let mut result = Vec::new();
     loop {
         let byte = read_u8(stream)?;
-        trace!("byte: {:08b}", byte);
+        // trace!("byte: {:08b}", byte);
         result.push(byte);
         if byte & VAR_MASK == VAR_LAST {
             break;
@@ -94,7 +93,7 @@ fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
 pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
-    trace!("first_byte: {:08b}", first_byte);
+    // trace!("first_byte: {:08b}", first_byte);
     let c_header = CHeader::from(first_byte & C_HEADER_MASK);
     match c_header {
         CHeader::CTb | CHeader::CNt | CHeader::CIj => {

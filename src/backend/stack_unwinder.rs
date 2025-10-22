@@ -193,11 +193,11 @@ impl StackUnwinder {
                         frames_closed: closed,
                     });
                 }
-                // otherwise, pop until we find the frame with the same prv as the current prv
+                // otherwise, pop until we find the frame with the same prv as the current prv or lower
                 loop {
                     let frame = self.peek_head_frames();
                     if let Some(frame) = frame {
-                        if frame.symbol.prv == self.curr_prv {
+                        if frame.symbol.prv <= self.curr_prv {
                             return Some(StackUpdateResult {
                                 frames_opened: Vec::new(),
                                 frames_closed: closed,

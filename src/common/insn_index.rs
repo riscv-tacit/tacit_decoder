@@ -14,12 +14,18 @@ pub struct InstructionIndex {
     u_insn_maps: HashMap<u64, HashMap<u64, Insn>>,
     k_insn_map: HashMap<u64, Insn>,
     m_insn_map: HashMap<u64, Insn>,
+    empty_map: HashMap<u64, Insn>,
 }
 
 impl InstructionIndex {
     pub fn get(&self, space: Prv, ctx: u64) -> &HashMap<u64, Insn> {
         match space {
-            Prv::PrvUser => &self.u_insn_maps[&ctx],
+            Prv::PrvUser => 
+                if self.u_insn_maps.contains_key(&ctx) {
+                    &self.u_insn_maps[&ctx]
+                } else {
+                    &self.empty_map
+                },
             Prv::PrvSupervisor => &self.k_insn_map,
             Prv::PrvMachine => &self.m_insn_map,
             _ => panic!("Unsupported privilege level: {:?}", space),
@@ -187,5 +193,6 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         u_insn_maps,
         k_insn_map,
         m_insn_map,
+        empty_map: HashMap::new(),
     })
 }
