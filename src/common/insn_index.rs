@@ -20,12 +20,13 @@ pub struct InstructionIndex {
 impl InstructionIndex {
     pub fn get(&self, space: Prv, ctx: u64) -> &HashMap<u64, Insn> {
         match space {
-            Prv::PrvUser => 
+            Prv::PrvUser => {
                 if self.u_insn_maps.contains_key(&ctx) {
                     &self.u_insn_maps[&ctx]
                 } else {
                     &self.empty_map
-                },
+                }
+            }
             Prv::PrvSupervisor => &self.k_insn_map,
             Prv::PrvMachine => &self.m_insn_map,
             _ => panic!("Unsupported privilege level: {:?}", space),

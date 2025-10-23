@@ -26,6 +26,7 @@ mod backend {
     pub mod atomic_receiver;
     pub mod event;
     pub mod gcda_receiver;
+    pub mod path_profile_receiver;
     pub mod perfetto_receiver;
     pub mod speedscope_receiver;
     pub mod stack_txt_receiver;
@@ -66,6 +67,7 @@ use backend::stack_txt_receiver::StackTxtReceiver;
 use backend::stats_receiver::StatsReceiver;
 use backend::txt_receiver::TxtReceiver;
 use backend::vbb_receiver::VBBReceiver;
+use backend::path_profile_receiver::PathProfileReceiver;
 use common::static_cfg::{load_file_config, DecoderStaticCfg};
 // error handling
 use anyhow::Result;
@@ -133,6 +135,9 @@ struct Args {
     // output the decoded trace in vbb format
     #[arg(long)]
     to_vbb: Option<bool>,
+    // output the decoded trace in path profile format
+    #[arg(long)]
+    to_path_profile: Option<bool>,
 }
 
 fn main() -> Result<()> {
@@ -168,6 +173,7 @@ fn main() -> Result<()> {
     let to_speedscope = pick_arg(args.to_speedscope, file_cfg.to_speedscope);
     let to_perfetto = pick_arg(args.to_perfetto, file_cfg.to_perfetto);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
+    let to_path_profile = pick_arg(args.to_path_profile, file_cfg.to_path_profile);
     let static_cfg = DecoderStaticCfg {
         encoded_trace,
         application_binary_asid_tuples,
@@ -186,6 +192,7 @@ fn main() -> Result<()> {
         to_speedscope,
         to_perfetto,
         to_vbb,
+        to_path_profile,
     };
 
     // verify the binary exists and is a file
@@ -347,6 +354,16 @@ fn main() -> Result<()> {
     if to_vbb {
         let vbb_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(VBBReceiver::new(vbb_bus_endpoint)));
+    }
+    if to_path_profile {
+        let path_profile_bus_endpoint = bus.add_rx();
+        let path_profile_symbol_index = std::sync::Arc::clone(&symbol_index);
+        let path_profile_insn_index = std::sync::Arc::clone(&insn_index);
+        receivers.push(Box::new(PathProfileReceiver::new(
+            path_profile_bus_endpoint,
+            path_profile_symbol_index,
+            path_profile_insn_index,
+        )));
     }
 
     let encoded_trace_path = static_cfg.encoded_trace.clone();

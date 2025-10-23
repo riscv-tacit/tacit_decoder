@@ -22,9 +22,17 @@ use std::sync::Arc;
 
 // const ADDR_BITS: u64 = 64;
 const ADDR_BITS: u64 = 40;
-const ADDR_MASK: u64 = if ADDR_BITS == 64 { 0xffffffffffffffff } else { (1 << ADDR_BITS) - 1 };
+const ADDR_MASK: u64 = if ADDR_BITS == 64 {
+    0xffffffffffffffff
+} else {
+    (1 << ADDR_BITS) - 1
+};
 const ADDR_EXTENDER_BITS: u64 = 64 - ADDR_BITS;
-const SIGNED_ADDR_EXTENDER_MASK: u64 = if ADDR_EXTENDER_BITS == 64 { 0x0 } else { (1 << ADDR_EXTENDER_BITS) - 1 };
+const SIGNED_ADDR_EXTENDER_MASK: u64 = if ADDR_EXTENDER_BITS == 64 {
+    0x0
+} else {
+    (1 << ADDR_EXTENDER_BITS) - 1
+};
 const UNSIGNED_ADDR_EXTENDER_MASK: u64 = 0x0;
 
 struct PC {
@@ -58,7 +66,12 @@ impl PC {
         } else {
             UNSIGNED_ADDR_EXTENDER_MASK
         };
-        let extended_addr = self.addr | if ADDR_BITS == 64 { 0x0 } else { extender << ADDR_BITS };
+        let extended_addr = self.addr
+            | if ADDR_BITS == 64 {
+                0x0
+            } else {
+                extender << ADDR_BITS
+            };
         extended_addr
     }
 
@@ -207,13 +220,14 @@ pub fn decode_trace(
             // only step if we are in a known ctx
             let trapping_pc = refund_addr(packet.from_address);
             if !(u_unknown_ctx && prv == Prv::PrvUser) {
-                let new_pc = step_bb_until(
-                    pc.get_addr(),
-                    get_insn_map(prv, ctx),
-                    trapping_pc,
-                    &mut bus,
+                let new_pc =
+                    step_bb_until(pc.get_addr(), get_insn_map(prv, ctx), trapping_pc, &mut bus);
+                assert!(
+                    new_pc == trapping_pc,
+                    "new_pc: {:x}, trapping_pc: {:x}",
+                    new_pc,
+                    trapping_pc
                 );
-                assert!(new_pc == trapping_pc, "new_pc: {:x}, trapping_pc: {:x}", new_pc, trapping_pc);
             }
             // trap event
             let trap_type = match packet.func3 {
@@ -331,7 +345,7 @@ pub fn decode_trace(
                 timestamp += packet.timestamp;
                 trace!("ignoring packet in unknown ctx");
                 continue;
-            } 
+            }
             // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
             let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
             pc.set_addr(new_pc);
