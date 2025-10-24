@@ -12,12 +12,16 @@ use std::io::{BufWriter, Write};
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct Path {
     entry_point: u64,
+    name: String,
     branches: Vec<bool>,
 }
 
-pub struct PathRecord {
-    path: Path,
-    times: Vec<u64>,
+impl Path {
+    pub fn to_string(&self) -> String {
+        // convert branches to a string of 0s and 1s
+        let branches_str = self.branches.iter().map(|b| if *b { "1" } else { "0" }).collect::<Vec<_>>().join("");
+        format!("{}-0x{:x}-{}", self.name, self.entry_point, branches_str)
+    }
 }
 
 pub struct PathProfileReceiver {
@@ -25,7 +29,8 @@ pub struct PathProfileReceiver {
     receiver: BusReceiver,
     path_records: HashMap<Path, Vec<u64>>,
     unwinder: StackUnwinder,
-    current_paths: Vec<PathRecord>,
+    current_path: Option<Path>,
+    current_start_time: u64,
 }
 
 impl PathProfileReceiver {
@@ -44,16 +49,30 @@ impl PathProfileReceiver {
             },
             path_records: HashMap::new(),
             unwinder,
-            current_paths: Vec::new(),
+            current_path: None,
+            current_start_time: 0,
         }
     }
 
-    fn record_branch(&mut self, taken: bool, timestamp: u64) {
+    fn record_branch(&mut self, taken: bool) {
         // peek the top of the current paths
-        if let Some(path_record) = self.current_paths.last_mut() {
-            path_record.path.branches.push(taken);
-            path_record.times.push(timestamp);
+        if let Some(ref mut path) = self.current_path {
+            path.branches.push(taken);
         }
+    }
+
+    fn dump_current_path(&mut self, end_timestamp: u64) {
+        if let Some(path) = self.current_path.clone() {
+            // insert a record for this path
+            let duration = end_timestamp - self.current_start_time;
+            if let Some(records) = self.path_records.get_mut(&path) {
+                records.push(duration);
+            } else {
+                self.path_records.insert(path, vec![duration]);
+            }
+        }
+        self.current_path = None;
+        self.current_start_time = 0;
     }
 }
 
@@ -72,10 +91,10 @@ impl AbstractReceiver for PathProfileReceiver {
             Entry::Event { timestamp, kind } => {
                 match kind {
                     EventKind::TakenBranch { .. } => {
-                        self.record_branch(true, timestamp);
+                        self.record_branch(true);
                     }
                     EventKind::NonTakenBranch { .. } => {
-                        self.record_branch(false, timestamp);
+                        self.record_branch(false);
                     }
                     _ => {}
                 }
@@ -84,35 +103,41 @@ impl AbstractReceiver for PathProfileReceiver {
                     kind: kind.clone(),
                 }) {
                     // dump all closed frames' paths
-                    for frame in update.frames_closed {
-                        let path = self.current_paths.pop().unwrap();
-                        // if path record is not empty, write it to the writer
-                        if !path.times.is_empty() {
-                            self.writer.write_all(format!("pop {:?} @ 0x{:x}\n", frame.symbol.name, frame.addr).as_bytes()).unwrap();
-                            self.writer.write_all(format!("times: {:?}\n", path.times).as_bytes()).unwrap();
-                            self.writer.write_all(format!("branches: {:?}\n", path.path.branches).as_bytes()).unwrap();
-                            self.writer.write_all(format!("--------------------------------\n").as_bytes()).unwrap();
+                    if !update.frames_closed.is_empty() { 
+                        self.dump_current_path(timestamp);
+                        // peek the top of the current stack to create a new path 
+                        let frame = self.unwinder.peek_head_frames();
+                        if let Some(frame) = frame {
+                            let path = Path {
+                                name: frame.symbol.name.clone() + "-dirty",
+                                entry_point: frame.addr,
+                                branches: Vec::new(),
+                            };
+                            self.current_path = Some(path);
+                            self.current_start_time = timestamp;
                         }
-                    }
-                    // push a new path for each opened frame
-                    for frame in update.frames_opened {
+                    } else if !update.frames_opened.is_empty() {
+                        let frame = update.frames_opened[0].clone();
                         let path = Path {
+                            name: frame.symbol.name.clone(),
                             entry_point: frame.addr,
                             branches: Vec::new(),
                         };
-                        self.current_paths.push(PathRecord {
-                            path,
-                            times: Vec::new(),
-                        });
+                        self.current_path = Some(path);
+                        self.current_start_time = timestamp;
                     }
                 }
-                // otherwise, append the the currently logging path
-
             }
         }
     }
 
     fn _flush(&mut self) {
+        for (path, records) in self.path_records.iter() {
+            self.writer.write_all(format!("path: {}\n", path.to_string()).as_bytes()).unwrap();
+            self.writer.write_all(format!("times: {:?}\n", records).as_bytes()).unwrap();
+            // self.writer.write_all(format!("branches: {:?}\n", path.branches).as_bytes()).unwrap();
+            self.writer.write_all(format!("--------------------------------\n").as_bytes()).unwrap();
+        }
         self.writer.flush().unwrap();
     }
 }
