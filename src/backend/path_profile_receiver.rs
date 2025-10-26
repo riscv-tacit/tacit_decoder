@@ -133,8 +133,13 @@ impl AbstractReceiver for PathProfileReceiver {
 
     fn _flush(&mut self) {
         for (path, records) in self.path_records.iter() {
+            // compute mean and standard deviation
+            let mean = records.iter().sum::<u64>() as f64 / records.len() as f64;
+            let stddev = records.iter().map(|&x| (x as f64 - mean).powi(2)).sum::<f64>() / records.len() as f64;
+            let stddev = stddev.sqrt();
             self.writer.write_all(format!("path: {}\n", path.to_string()).as_bytes()).unwrap();
             self.writer.write_all(format!("times: {:?}\n", records).as_bytes()).unwrap();
+            self.writer.write_all(format!("mean: {:2.2}, stddev: {:2.2}\n", mean, stddev).as_bytes()).unwrap();
             // self.writer.write_all(format!("branches: {:?}\n", path.branches).as_bytes()).unwrap();
             self.writer.write_all(format!("--------------------------------\n").as_bytes()).unwrap();
         }
