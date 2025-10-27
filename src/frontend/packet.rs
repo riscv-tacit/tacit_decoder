@@ -27,7 +27,7 @@ pub struct Packet {
     pub target_address: u64,
     pub from_address: u64,
     pub target_prv: Prv,
-    pub from_ctx: u64, // used for debugging only
+    pub _from_ctx: u64, // used for debugging only
     pub target_ctx: u64,
     pub from_prv: Prv,
     pub timestamp: u64,
@@ -44,7 +44,7 @@ impl Packet {
             target_address: 0,
             from_address: 0,
             target_prv: Prv::PrvUser,
-            from_ctx: 0,
+            _from_ctx: 0,
             target_ctx: 0,
             from_prv: Prv::PrvUser,
             timestamp: 0,

@@ -1,7 +1,6 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
-use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
@@ -57,12 +56,11 @@ impl SpeedscopeReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
-        insns: Arc<InstructionIndex>,
     ) -> Self {
         debug!("SpeedscopeReceiver::new");
 
         let unwinder =
-            StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns)).expect("stack unwinder");
+            StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
 
         let (frames, frame_lookup) = build_frames(&symbols);
 
@@ -95,7 +93,7 @@ impl SpeedscopeReceiver {
             }
         }
 
-        for frame in update.frames_opened {
+        if let Some(frame) = update.frames_opened {
             if let Some(id) = self.lookup_frame(&frame) {
                 self.events.push(ProfileEvent {
                     kind: "O".into(),

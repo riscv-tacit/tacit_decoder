@@ -1,7 +1,6 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::StackUnwinder;
-use crate::common::insn_index::InstructionIndex;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
 use std::collections::HashMap;
@@ -42,10 +41,9 @@ impl PathProfileReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
-        insns: Arc<InstructionIndex>,
     ) -> Self {
         let unwinder =
-            StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns)).expect("stack unwinder");
+            StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
         Self {
             writer: BufWriter::new(File::create("trace.path_profile.txt").unwrap()),
             receiver: BusReceiver {
@@ -68,7 +66,7 @@ impl PathProfileReceiver {
     }
 
     fn dump_current_path(&mut self, end_timestamp: u64) {
-        if let Some(path) = self.current_path.clone() {
+        if let Some(path) = self.current_path.take() {
             // insert a record for this path
             let duration = end_timestamp - self.current_start_time;
             if let Some(records) = self.path_records.get_mut(&path) {
@@ -106,7 +104,7 @@ impl AbstractReceiver for PathProfileReceiver {
                 }
                 if let Some(update) = self.unwinder.step(&Entry::Event {
                     timestamp,
-                    kind: kind.clone(),
+                    kind: kind,
                 }) {
                     // dump all closed frames' paths
                     if !update.frames_closed.is_empty() {

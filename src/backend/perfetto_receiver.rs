@@ -1,7 +1,6 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
-use crate::common::insn_index::InstructionIndex;
 use crate::common::symbol_index::SymbolIndex;
 
 use bus::BusReader;
@@ -25,9 +24,8 @@ impl PerfettoReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
-        insns: Arc<InstructionIndex>,
     ) -> Self {
-        let unwinder = StackUnwinder::new(symbols, insns).expect("stack unwinder");
+        let unwinder = StackUnwinder::new(symbols).expect("stack unwinder");
         PerfettoReceiver {
             writer: BufWriter::new(File::create("trace.perfetto.json").unwrap()),
             receiver: BusReceiver {
@@ -47,7 +45,7 @@ impl PerfettoReceiver {
         for frame in update.frames_closed {
             self.emit_end(ts, &frame);
         }
-        for frame in update.frames_opened {
+        if let Some(frame) = update.frames_opened {
             self.emit_begin(ts, &frame);
         }
     }

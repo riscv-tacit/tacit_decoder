@@ -44,9 +44,6 @@ pub enum EventKind {
         hit_count: u64,
     },
     BPMiss,
-    ContextChange {
-        ctx: u64,
-    },
     Panic,
 }
 
@@ -132,9 +129,9 @@ impl EventKind {
         EventKind::SyncEnd { end_pc }
     }
 
-    pub fn sync_periodic() -> Self {
-        EventKind::SyncPeriodic
-    }
+    // pub fn sync_periodic() -> Self {
+    //     EventKind::SyncPeriodic
+    // }
 
     pub fn bphit(hit_count: u64) -> Self {
         EventKind::BPHit { hit_count }
@@ -144,53 +141,53 @@ impl EventKind {
         EventKind::BPMiss
     }
 
-    pub fn context_change(ctx: u64) -> Self {
-        EventKind::ContextChange { ctx }
-    }
+    // pub fn context_change(ctx: u64) -> Self {
+    //     EventKind::ContextChange { ctx }
+    // }
 
     pub fn panic() -> Self {
         EventKind::Panic
     }
 
     // getters
-    pub fn get_from_addr(&self) -> Option<u64> {
-        match self {
-            EventKind::TakenBranch { arc } => Some(arc.0),
-            EventKind::UninferableJump { arc } => Some(arc.0),
-            EventKind::InferrableJump { arc } => Some(arc.0),
-            _ => None,
-        }
-    }
+    // pub fn get_from_addr(&self) -> Option<u64> {
+    //     match self {
+    //         EventKind::TakenBranch { arc } => Some(arc.0),
+    //         EventKind::UninferableJump { arc } => Some(arc.0),
+    //         EventKind::InferrableJump { arc } => Some(arc.0),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_to_addr(&self) -> Option<u64> {
-        match self {
-            EventKind::TakenBranch { arc } => Some(arc.1),
-            EventKind::UninferableJump { arc } => Some(arc.1),
-            EventKind::InferrableJump { arc } => Some(arc.1),
-            _ => None,
-        }
-    }
+    // pub fn get_to_addr(&self) -> Option<u64> {
+    //     match self {
+    //         EventKind::TakenBranch { arc } => Some(arc.1),
+    //         EventKind::UninferableJump { arc } => Some(arc.1),
+    //         EventKind::InferrableJump { arc } => Some(arc.1),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_trap_reason(&self) -> Option<TrapReason> {
-        match self {
-            EventKind::Trap { reason, .. } => Some(reason.clone()),
-            _ => None,
-        }
-    }
+    // pub fn get_trap_reason(&self) -> Option<TrapReason> {
+    //     match self {
+    //         EventKind::Trap { reason, .. } => Some(reason.clone()),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_prv_arc(&self) -> Option<(Prv, Prv)> {
-        match self {
-            EventKind::Trap { prv_arc, .. } => Some(prv_arc.clone()),
-            _ => None,
-        }
-    }
+    // pub fn get_prv_arc(&self) -> Option<(Prv, Prv)> {
+    //     match self {
+    //         EventKind::Trap { prv_arc, .. } => Some(prv_arc.clone()),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_ctx(&self) -> Option<u64> {
-        match self {
-            EventKind::ContextChange { ctx } => Some(ctx.clone()),
-            _ => None,
-        }
-    }
+    // pub fn get_ctx(&self) -> Option<u64> {
+    //     match self {
+    //         EventKind::ContextChange { ctx } => Some(ctx.clone()),
+    //         _ => None,
+    //     }
+    // }
 }
 
 impl From<TrapType> for TrapReason {

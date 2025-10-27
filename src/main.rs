@@ -242,7 +242,9 @@ fn main() -> Result<()> {
     let (first_packet, runtime_cfg) = {
         let trace_file = File::open(static_cfg.encoded_trace.clone())?;
         let mut trace_reader = BufReader::new(trace_file);
-        frontend::packet::read_first_packet(&mut trace_reader)?
+        let (first_packet, runtime_cfg) = frontend::packet::read_first_packet(&mut trace_reader)?;
+        drop(trace_reader);
+        (first_packet, runtime_cfg)
     };
 
     if static_cfg.header_only {
@@ -291,20 +293,17 @@ fn main() -> Result<()> {
 
     if to_stack_txt {
         let to_stack_txt_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let to_stack_txt_insn_index = std::sync::Arc::clone(&insn_index);
         let stack_txt_rx = StackTxtReceiver::new(
             bus.add_rx(),
             to_stack_txt_symbol_index,
-            to_stack_txt_insn_index,
         );
         receivers.push(Box::new(stack_txt_rx));
     }
 
     if to_atomics {
         let to_atomics_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let to_atomics_insn_index = std::sync::Arc::clone(&insn_index);
         let atomic_rx =
-            AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index, to_atomics_insn_index);
+            AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index);
         receivers.push(Box::new(atomic_rx));
     }
 
@@ -333,22 +332,18 @@ fn main() -> Result<()> {
     if to_speedscope {
         let speedscope_bus_endpoint = bus.add_rx();
         let speedscope_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let speedscope_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(SpeedscopeReceiver::new(
             speedscope_bus_endpoint,
             speedscope_symbol_index,
-            speedscope_insn_index,
         )));
     }
 
     if to_perfetto {
         let perfetto_bus_endpoint = bus.add_rx();
         let perfetto_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let perfetto_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(PerfettoReceiver::new(
             perfetto_bus_endpoint,
             perfetto_symbol_index,
-            perfetto_insn_index,
         )));
     }
 
@@ -359,11 +354,9 @@ fn main() -> Result<()> {
     if to_path_profile {
         let path_profile_bus_endpoint = bus.add_rx();
         let path_profile_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let path_profile_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(PathProfileReceiver::new(
             path_profile_bus_endpoint,
             path_profile_symbol_index,
-            path_profile_insn_index,
         )));
     }
 

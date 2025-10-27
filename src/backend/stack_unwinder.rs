@@ -3,7 +3,6 @@ use log::debug;
 use std::sync::Arc;
 
 use crate::backend::event::{Entry, EventKind, TrapReason};
-use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
 use crate::common::symbol_index::{SymbolIndex, SymbolInfo};
 
@@ -16,8 +15,6 @@ pub struct Frame {
 pub struct StackUnwinder {
     // addr -> symbol info <name, index, line, file>
     pub func_symbol_map: Arc<SymbolIndex>,
-    // addr -> insn
-    pub insn_map: Arc<InstructionIndex>,
     // stack model
     pub frame_stack: Vec<Frame>,
     // current privilege level
@@ -34,11 +31,9 @@ pub struct StackUpdateResult {
 impl StackUnwinder {
     pub fn new(
         func_symbol_map: Arc<SymbolIndex>,
-        insn_index: Arc<InstructionIndex>,
     ) -> Result<Self> {
         Ok(Self {
             func_symbol_map: func_symbol_map,
-            insn_map: insn_index,
             frame_stack: Vec::new(),
             curr_prv: Prv::PrvMachine, // placeholder, will be set by the first sync start event
             curr_ctx: 0,               // placeholder, will be set by the first context change event
@@ -233,13 +228,5 @@ impl StackUnwinder {
 
     pub fn peek_head_frames(&self) -> &Frame {
         self.frame_stack.last().unwrap()
-    }
-
-    pub fn peak_frame_count(&self) -> usize {
-        self.frame_stack.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.frame_stack.is_empty()
     }
 }

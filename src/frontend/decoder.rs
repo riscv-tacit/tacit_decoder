@@ -18,7 +18,6 @@ use crate::frontend::trap_type::TrapType;
 
 use rustc_data_structures::fx::FxHashMap;
 use rvdasm::insn::Insn;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 // const ADDR_BITS: u64 = 64;
@@ -83,13 +82,13 @@ impl PC {
 
 fn refund_addr(addr: u64) -> u64 {
     let shifted_addr = addr << 1;
-    let sign_bit = shifted_addr >> 39;
+    let sign_bit = shifted_addr >> (ADDR_BITS - 1);
     let extender = if sign_bit == 1 {
         SIGNED_ADDR_EXTENDER_MASK
     } else {
         UNSIGNED_ADDR_EXTENDER_MASK
     };
-    let extended_addr = shifted_addr | (extender << 40);
+    let extended_addr = shifted_addr | (extender << ADDR_BITS);
     extended_addr
     // extended_addr << 1
 }
@@ -180,12 +179,13 @@ pub fn decode_trace(
     let mut bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
 
     // initial state from first packet
-    let mut packet_count = 0u64;
+    // let mut packet_count = 0u64;
     let mut pc = PC::new(first_packet.target_address);
     let mut timestamp = first_packet.timestamp;
     let mut prv = first_packet.target_prv;
     let mut ctx = first_packet.target_ctx;
     let mut u_unknown_ctx = false;
+
     bus.broadcast(Entry::event(
         EventKind::sync_start(first_runtime_cfg, pc.get_addr(), prv, ctx),
         first_packet.timestamp,
@@ -206,7 +206,7 @@ pub fn decode_trace(
         }
 
         debug!("packet: {:?}", packet);
-        packet_count += 1;
+        // packet_count += 1;
 
         // Select the correct instruction map based on privilege and context
         let get_insn_map = |p: Prv, ctx: u64| -> &FxHashMap<u64, Insn> { insn_index.get(p, ctx) };
@@ -250,6 +250,7 @@ pub fn decode_trace(
                 if find_ctx(packet.target_ctx, &static_cfg) {
                     ctx = packet.target_ctx;
                     u_unknown_ctx = false; // we now are in a known ctx
+                    // decode_cache.flush(); // flush the decode cachedd after reporting the trap event with ctx
                 } else {
                     u_unknown_ctx = true; // we are in an unknown ctx
                 }
@@ -448,7 +449,7 @@ pub fn decode_trace(
     }
 
     drop(bus);
-    println!("[Success] Decoded {} packets", packet_count);
+    // println!("[Success] Decoded {} packets", packet_count);
     progress_bar.finish_and_clear();
     Ok(())
 }
