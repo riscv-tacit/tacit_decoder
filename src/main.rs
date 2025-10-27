@@ -6,6 +6,7 @@ extern crate indicatif;
 extern crate log;
 extern crate object;
 extern crate rvdasm;
+extern crate rustc_data_structures;
 
 mod frontend {
     pub mod bp_double_saturating_counter;
@@ -61,13 +62,13 @@ use backend::afdo_receiver::AfdoReceiver;
 use backend::atomic_receiver::AtomicReceiver;
 use backend::event::Entry;
 use backend::gcda_receiver::GcdaReceiver;
+use backend::path_profile_receiver::PathProfileReceiver;
 use backend::perfetto_receiver::PerfettoReceiver;
 use backend::speedscope_receiver::SpeedscopeReceiver;
 use backend::stack_txt_receiver::StackTxtReceiver;
 use backend::stats_receiver::StatsReceiver;
 use backend::txt_receiver::TxtReceiver;
 use backend::vbb_receiver::VBBReceiver;
-use backend::path_profile_receiver::PathProfileReceiver;
 use common::static_cfg::{load_file_config, DecoderStaticCfg};
 // error handling
 use anyhow::Result;

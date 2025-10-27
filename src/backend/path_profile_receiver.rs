@@ -3,11 +3,11 @@ use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::StackUnwinder;
 use crate::common::insn_index::InstructionIndex;
 use crate::common::symbol_index::SymbolIndex;
-use std::sync::Arc;
 use bus::BusReader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::sync::Arc;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct Path {
@@ -19,7 +19,12 @@ pub struct Path {
 impl Path {
     pub fn to_string(&self) -> String {
         // convert branches to a string of 0s and 1s
-        let branches_str = self.branches.iter().map(|b| if *b { "1" } else { "0" }).collect::<Vec<_>>().join("");
+        let branches_str = self
+            .branches
+            .iter()
+            .map(|b| if *b { "1" } else { "0" })
+            .collect::<Vec<_>>()
+            .join("");
         format!("{}-0x{:x}-{}", self.name, self.entry_point, branches_str)
     }
 }
@@ -39,7 +44,8 @@ impl PathProfileReceiver {
         symbols: Arc<SymbolIndex>,
         insns: Arc<InstructionIndex>,
     ) -> Self {
-        let unwinder = StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns)).expect("stack unwinder");
+        let unwinder =
+            StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns)).expect("stack unwinder");
         Self {
             writer: BufWriter::new(File::create("trace.path_profile.txt").unwrap()),
             receiver: BusReceiver {
@@ -103,11 +109,11 @@ impl AbstractReceiver for PathProfileReceiver {
                     kind: kind.clone(),
                 }) {
                     // dump all closed frames' paths
-                    if !update.frames_closed.is_empty() { 
+                    if !update.frames_closed.is_empty() {
                         self.dump_current_path(timestamp);
-                        // peek the top of the current stack to create a new path 
-                        let frame = self.unwinder.peek_head_frames();
-                        if let Some(frame) = frame {
+                        // peek the top of the current stack to create a new path
+                        if !self.unwinder.frame_stack.is_empty() {
+                            let frame = self.unwinder.peek_head_frames();
                             let path = Path {
                                 name: frame.symbol.name.clone() + "-dirty",
                                 entry_point: frame.addr,
@@ -116,8 +122,7 @@ impl AbstractReceiver for PathProfileReceiver {
                             self.current_path = Some(path);
                             self.current_start_time = timestamp;
                         }
-                    } else if !update.frames_opened.is_empty() {
-                        let frame = update.frames_opened[0].clone();
+                    } else if let Some(frame) = update.frames_opened {
                         let path = Path {
                             name: frame.symbol.name.clone(),
                             entry_point: frame.addr,
@@ -135,13 +140,25 @@ impl AbstractReceiver for PathProfileReceiver {
         for (path, records) in self.path_records.iter() {
             // compute mean and standard deviation
             let mean = records.iter().sum::<u64>() as f64 / records.len() as f64;
-            let stddev = records.iter().map(|&x| (x as f64 - mean).powi(2)).sum::<f64>() / records.len() as f64;
+            let stddev = records
+                .iter()
+                .map(|&x| (x as f64 - mean).powi(2))
+                .sum::<f64>()
+                / records.len() as f64;
             let stddev = stddev.sqrt();
-            self.writer.write_all(format!("path: {}\n", path.to_string()).as_bytes()).unwrap();
-            self.writer.write_all(format!("times: {:?}\n", records).as_bytes()).unwrap();
-            self.writer.write_all(format!("mean: {:2.2}, stddev: {:2.2}\n", mean, stddev).as_bytes()).unwrap();
+            self.writer
+                .write_all(format!("path: {}\n", path.to_string()).as_bytes())
+                .unwrap();
+            self.writer
+                .write_all(format!("times: {:?}\n", records).as_bytes())
+                .unwrap();
+            self.writer
+                .write_all(format!("mean: {:2.2}, stddev: {:2.2}\n", mean, stddev).as_bytes())
+                .unwrap();
             // self.writer.write_all(format!("branches: {:?}\n", path.branches).as_bytes()).unwrap();
-            self.writer.write_all(format!("--------------------------------\n").as_bytes()).unwrap();
+            self.writer
+                .write_all(format!("--------------------------------\n").as_bytes())
+                .unwrap();
         }
         self.writer.flush().unwrap();
     }

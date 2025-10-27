@@ -16,6 +16,7 @@ use crate::frontend::packet;
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use crate::frontend::trap_type::TrapType;
 
+use rustc_data_structures::fx::FxHashMap;
 use rvdasm::insn::Insn;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -94,13 +95,13 @@ fn refund_addr(addr: u64) -> u64 {
 }
 
 // step until encountering a br/jump
-fn step_bb(pc: u64, insn_map: &HashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode) -> u64 {
+fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode) -> u64 {
     let mut pc = pc;
     let stop_on_ij = *br_mode == BrMode::BrTarget;
     loop {
         trace!("stepping bb pc: {:x}", pc);
         let insn = insn_map.get(&pc).unwrap();
-        bus.broadcast(Entry::instruction(insn, pc));
+        // bus.broadcast(Entry::instruction(insn, pc));
         if stop_on_ij {
             if insn.is_branch() || insn.is_direct_jump() || insn.is_indirect_jump() {
                 break;
@@ -112,7 +113,7 @@ fn step_bb(pc: u64, insn_map: &HashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode
                 break;
             } else if insn.is_direct_jump() {
                 let new_pc =
-                    (pc as i64 + insn.get_imm().unwrap().get_val_signed_imm() as i64) as u64;
+                    (pc as i64 + insn.offset as i64) as u64;
                 pc = new_pc;
             } else {
                 pc += insn.len as u64;
@@ -124,7 +125,7 @@ fn step_bb(pc: u64, insn_map: &HashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode
 
 fn step_bb_until(
     pc: u64,
-    insn_map: &HashMap<u64, Insn>,
+    insn_map: &FxHashMap<u64, Insn>,
     target_pc: u64,
     bus: &mut Bus<Entry>,
 ) -> u64 {
@@ -133,7 +134,7 @@ fn step_bb_until(
 
     loop {
         let insn = insn_map.get(&pc).unwrap();
-        bus.broadcast(Entry::instruction(insn, pc));
+        // bus.broadcast(Entry::instruction(insn, pc));
         if insn.is_branch() || insn.is_direct_jump() {
             break;
         }
@@ -169,8 +170,10 @@ pub fn decode_trace(
     let progress_bar = ProgressBar::new(trace_file_size);
     progress_bar.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/green}] {bytes}/{total_bytes} ({eta})")?);
 
-    let mut trace_reader = BufReader::new(trace_file);
+    let mut trace_reader = BufReader::with_capacity(1 << 20, trace_file);
     let (first_packet, first_runtime_cfg) = packet::read_first_packet(&mut trace_reader)?;
+    const PROGRESS_UPDATE_STEP: u64 = 1 << 20; // throttle progress updates to ~1 MiB increments
+    let mut last_progress_update = 0u64;
 
     let br_mode = runtime_cfg.br_mode;
     let mode_is_predict = br_mode == BrMode::BrPredict;
@@ -187,25 +190,32 @@ pub fn decode_trace(
         EventKind::sync_start(first_runtime_cfg, pc.get_addr(), prv, ctx),
         first_packet.timestamp,
     ));
+    let mut packet = packet::Packet::new();
 
     loop {
-        let packet = match packet::read_packet(&mut trace_reader) {
-            Ok(pkt) => pkt,
+        match packet::read_packet(&mut trace_reader, &mut packet) {
+            Ok(_) => (),
             Err(_) => break,
         };
         let current_position = trace_reader.stream_position()?;
-        progress_bar.set_position(current_position);
+        if current_position.saturating_sub(last_progress_update) >= PROGRESS_UPDATE_STEP
+            || current_position == trace_file_size
+        {
+            progress_bar.set_position(current_position);
+            last_progress_update = current_position;
+        }
 
         debug!("packet: {:?}", packet);
         packet_count += 1;
 
         // Select the correct instruction map based on privilege and context
-        let get_insn_map = |p: Prv, ctx: u64| -> &HashMap<u64, Insn> { insn_index.get(p, ctx) };
+        let get_insn_map = |p: Prv, ctx: u64| -> &FxHashMap<u64, Insn> { insn_index.get(p, ctx) };
+        let mut curr_insn_map = get_insn_map(prv, ctx);
 
         if packet.f_header == FHeader::FSync {
             let new_pc = step_bb_until(
                 pc.get_addr(),
-                get_insn_map(prv, ctx),
+                curr_insn_map,
                 refund_addr(packet.target_address),
                 &mut bus,
             );
@@ -221,7 +231,7 @@ pub fn decode_trace(
             let trapping_pc = refund_addr(packet.from_address);
             if !(u_unknown_ctx && prv == Prv::PrvUser) {
                 let new_pc =
-                    step_bb_until(pc.get_addr(), get_insn_map(prv, ctx), trapping_pc, &mut bus);
+                    step_bb_until(pc.get_addr(), curr_insn_map, trapping_pc, &mut bus);
                 assert!(
                     new_pc == trapping_pc,
                     "new_pc: {:x}, trapping_pc: {:x}",
@@ -268,6 +278,7 @@ pub fn decode_trace(
             let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
             pc.set_addr(new_pc);
             trace!("new set pc: {:x}", pc.get_addr());
+            curr_insn_map = get_insn_map(prv, ctx); // update the instruction map
             continue;
         }
 
@@ -278,18 +289,19 @@ pub fn decode_trace(
                 packet.timestamp,
             ));
             for _ in 0..packet.timestamp {
-                let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
+                let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode);
                 pc.set_addr(new_pc);
-                let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();
+                let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
                 if !insn_to_resolve.is_branch() {
                     bus.broadcast(Entry::event(EventKind::panic(), 0));
                     panic!("pc: {:x}, insn: {:?}", pc.get_addr(), insn_to_resolve);
                 }
                 let taken = bp_counter.predict(pc.get_addr(), true);
                 if taken {
-                    let new_pc = (pc.get_addr() as i64
-                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                        as u64;
+                    // let new_pc = (pc.get_addr() as i64
+                    //     + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                    //     as u64;
+                    let new_pc = (pc.get_addr() as i64 + insn_to_resolve.offset as i64) as u64;
                     bus.broadcast(Entry::event(
                         EventKind::taken_branch((pc.get_addr(), new_pc)),
                         timestamp,
@@ -308,9 +320,9 @@ pub fn decode_trace(
             // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(EventKind::bpmiss(), timestamp));
-            let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
+            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode);
             pc.set_addr(new_pc);
-            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();
+            let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             if !insn_to_resolve.is_branch() {
                 bus.broadcast(Entry::event(EventKind::panic(), 0));
                 panic!(
@@ -322,9 +334,10 @@ pub fn decode_trace(
             }
             let taken = bp_counter.predict(pc.get_addr(), false);
             if !taken {
-                let new_pc = (pc.get_addr() as i64
-                    + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                    as u64;
+                // let new_pc = (pc.get_addr() as i64
+                    // + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                    // as u64;
+                let new_pc = (pc.get_addr() as i64 + insn_to_resolve.offset as i64) as u64;
                 bus.broadcast(Entry::event(
                     EventKind::taken_branch((pc.get_addr(), new_pc)),
                     timestamp,
@@ -347,9 +360,9 @@ pub fn decode_trace(
                 continue;
             }
             // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
-            let new_pc = step_bb(pc.get_addr(), get_insn_map(prv, ctx), &mut bus, &br_mode);
+            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode);
             pc.set_addr(new_pc);
-            let insn_to_resolve = get_insn_map(prv, ctx).get(&pc.get_addr()).unwrap();
+            let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             timestamp += packet.timestamp;
             match packet.f_header {
                 FHeader::FTb => {
@@ -362,9 +375,10 @@ pub fn decode_trace(
                             insn_to_resolve
                         );
                     }
-                    let new_pc = (pc.get_addr() as i64
-                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                        as u64;
+                    // let new_pc = (pc.get_addr() as i64
+                    //     + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                    //     as u64;
+                    let new_pc = (pc.get_addr() as i64 + insn_to_resolve.offset as i64) as u64;
                     bus.broadcast(Entry::event(
                         EventKind::taken_branch((pc.get_addr(), new_pc)),
                         timestamp,
@@ -398,9 +412,10 @@ pub fn decode_trace(
                             insn_to_resolve
                         );
                     }
-                    let new_pc = (pc.get_addr() as i64
-                        + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
-                        as u64;
+                    // let new_pc = (pc.get_addr() as i64
+                    //     + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
+                    //     as u64;
+                    let new_pc = (pc.get_addr() as i64 + insn_to_resolve.offset as i64) as u64;
                     bus.broadcast(Entry::event(
                         EventKind::inferrable_jump((pc.get_addr(), new_pc)),
                         timestamp,
@@ -434,5 +449,6 @@ pub fn decode_trace(
 
     drop(bus);
     println!("[Success] Decoded {} packets", packet_count);
+    progress_bar.finish_and_clear();
     Ok(())
 }

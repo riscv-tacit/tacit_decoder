@@ -27,7 +27,7 @@ pub struct StackUnwinder {
 }
 
 pub struct StackUpdateResult {
-    pub frames_opened: Vec<Frame>,
+    pub frames_opened: Option<Frame>,
     pub frames_closed: Vec<Frame>,
 }
 
@@ -47,16 +47,16 @@ impl StackUnwinder {
 
     fn push_frame(&mut self, prv: Prv, ctx: u64, addr: u64) -> Option<Frame> {
         let map = self.func_symbol_map.get(prv, ctx);
-        if !map.contains_key(&addr) {
-            return None;
+        if let Some((start, symbol)) = map.get_key_value(&addr) {
+            let frame = Frame {
+                symbol: symbol.clone(),
+                addr: *start,
+            };
+            self.frame_stack.push(frame.clone());
+            Some(frame)
+        } else {
+            None
         }
-        let (start, symbol) = map.get_key_value(&addr)?;
-        let frame = Frame {
-            symbol: symbol.clone(),
-            addr: *start,
-        };
-        self.frame_stack.push(frame.clone());
-        Some(frame)
     }
 
     fn pop_frame(&mut self) -> Option<Frame> {
@@ -101,7 +101,7 @@ impl StackUnwinder {
         debug!("stack unwinder push frame {:?}", frame);
         if let Some(frame) = frame {
             return Some(StackUpdateResult {
-                frames_opened: vec![frame],
+                frames_opened: Some(frame),
                 frames_closed: Vec::new(),
             });
         } else {
@@ -118,7 +118,7 @@ impl StackUnwinder {
             if start == target {
                 if let Some(frame) = self.push_frame(self.curr_prv, self.curr_ctx, target) {
                     return Some(StackUpdateResult {
-                        frames_opened: vec![frame],
+                        frames_opened: Some(frame),
                         frames_closed: Vec::new(),
                     });
                 }
@@ -129,12 +129,12 @@ impl StackUnwinder {
         //    treat it like a return within the unwinding loop.
         let mut closed: Vec<Frame> = Vec::new();
         loop {
-            let frame = self.peek_head_frames();
-            if let Some(frame) = frame {
+            if !self.frame_stack.is_empty() {
+                let frame = self.peek_head_frames();
                 // if the stack prv is different, we are done
                 if frame.symbol.prv != self.curr_prv {
                     return Some(StackUpdateResult {
-                        frames_opened: Vec::new(),
+                        frames_opened: Some(frame.clone()),
                         frames_closed: closed,
                     });
                 }
@@ -145,7 +145,7 @@ impl StackUnwinder {
                 {
                     if start <= target && end > target {
                         return Some(StackUpdateResult {
-                            frames_opened: Vec::new(),
+                            frames_opened: Some(frame.clone()),
                             frames_closed: closed,
                         });
                     }
@@ -153,7 +153,7 @@ impl StackUnwinder {
                 closed.push(self.pop_frame().unwrap());
             } else {
                 return Some(StackUpdateResult {
-                    frames_opened: Vec::new(),
+                    frames_opened: None,
                     frames_closed: closed,
                 });
             }
@@ -173,7 +173,7 @@ impl StackUnwinder {
                 let frame = self.push_frame(self.curr_prv, self.curr_ctx, to_addr);
                 if let Some(frame) = frame {
                     return Some(StackUpdateResult {
-                        frames_opened: vec![frame],
+                        frames_opened: Some(frame),
                         frames_closed: Vec::new(),
                     });
                 } else {
@@ -189,24 +189,24 @@ impl StackUnwinder {
                     }
                     self.curr_ctx = ctx.unwrap();
                     return Some(StackUpdateResult {
-                        frames_opened: Vec::new(),
+                        frames_opened: None,
                         frames_closed: closed,
                     });
                 }
                 // otherwise, pop until we find the frame with the same prv as the current prv or lower
                 loop {
-                    let frame = self.peek_head_frames();
-                    if let Some(frame) = frame {
+                    if !self.frame_stack.is_empty() {
+                        let frame = self.peek_head_frames();
                         if frame.symbol.prv <= self.curr_prv {
                             return Some(StackUpdateResult {
-                                frames_opened: Vec::new(),
+                                frames_opened: None,
                                 frames_closed: closed,
                             });
                         }
                         closed.push(self.pop_frame().unwrap());
                     } else {
                         return Some(StackUpdateResult {
-                            frames_opened: Vec::new(),
+                            frames_opened: None,
                             frames_closed: closed,
                         });
                     }
@@ -222,7 +222,7 @@ impl StackUnwinder {
             closed.push(frame);
         }
         return Some(StackUpdateResult {
-            frames_opened: Vec::new(),
+            frames_opened: None,
             frames_closed: closed,
         });
     }
@@ -231,12 +231,12 @@ impl StackUnwinder {
         self.frame_stack.clone()
     }
 
-    pub fn peek_head_frames(&self) -> Option<Frame> {
-        if self.frame_stack.is_empty() {
-            None
-        } else {
-            Some(self.frame_stack.last().unwrap().clone())
-        }
+    pub fn peek_head_frames(&self) -> &Frame {
+        self.frame_stack.last().unwrap()
+    }
+
+    pub fn peak_frame_count(&self) -> usize {
+        self.frame_stack.len()
     }
 
     pub fn is_empty(&self) -> bool {

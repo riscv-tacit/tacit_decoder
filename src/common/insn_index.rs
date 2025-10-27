@@ -9,16 +9,17 @@ use rvdasm::insn::Insn;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
+use rustc_data_structures::fx::FxHashMap;
 
 pub struct InstructionIndex {
-    u_insn_maps: HashMap<u64, HashMap<u64, Insn>>,
-    k_insn_map: HashMap<u64, Insn>,
-    m_insn_map: HashMap<u64, Insn>,
-    empty_map: HashMap<u64, Insn>,
+    u_insn_maps: HashMap<u64, FxHashMap<u64, Insn>>,
+    k_insn_map: FxHashMap<u64, Insn>,
+    m_insn_map: FxHashMap<u64, Insn>,
+    empty_map: FxHashMap<u64, Insn>,
 }
 
 impl InstructionIndex {
-    pub fn get(&self, space: Prv, ctx: u64) -> &HashMap<u64, Insn> {
+    pub fn get(&self, space: Prv, ctx: u64) -> &FxHashMap<u64, Insn> {
         match space {
             Prv::PrvUser => {
                 if self.u_insn_maps.contains_key(&ctx) {
@@ -55,7 +56,8 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         .ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
     let m_text_data = m_text_section.data()?;
     let m_entry_point = m_elf.entry();
-    let m_insn_map = dasm.disassemble_all(&m_text_data, m_entry_point);
+    let mut m_insn_map = FxHashMap::default();
+    m_insn_map.extend(dasm.disassemble_all(&m_text_data, m_entry_point));
     if m_insn_map.is_empty() {
         return Err(anyhow::anyhow!(
             "No executable instructions found in SBI ELF"
@@ -78,7 +80,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
             "User and machine ELF architectures must match"
         );
         // User-space instruction map
-        let mut u_insn_map = HashMap::new();
+        let mut u_insn_map = FxHashMap::default();
         for section in u_elf.sections() {
             if let object::SectionFlags::Elf { sh_flags } = section.flags() {
                 if sh_flags & (SHF_EXECINSTR as u64) != 0 {
@@ -103,7 +105,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         u_insn_maps.insert(asid.parse::<u64>()?, u_insn_map);
     }
 
-    let mut k_insn_map = HashMap::new();
+    let mut k_insn_map = FxHashMap::default();
     // Kernel-space instruction map
     if cfg.kernel_binary != "" {
         let mut k_elf_file = File::open(cfg.kernel_binary)?;
@@ -194,6 +196,6 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         u_insn_maps,
         k_insn_map,
         m_insn_map,
-        empty_map: HashMap::new(),
+        empty_map: FxHashMap::default(),
     })
 }

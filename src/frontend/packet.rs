@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::trace;
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -35,7 +35,7 @@ pub struct Packet {
 
 // Initialize a packet with default values
 impl Packet {
-    fn new() -> Packet {
+    pub fn new() -> Packet {
         Packet {
             is_compressed: false,
             c_header: CHeader::CNa,
@@ -64,19 +64,24 @@ const VAR_OFFSET: u8 = 7;
 const VAR_VAL_MASK: u8 = 0b0111_1111;
 
 fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
-    let mut result = Vec::new();
+    let mut scratch = [0u8; 10];
+    let mut count = 0usize;
     loop {
         let byte = read_u8(stream)?;
-        // trace!("byte: {:08b}", byte);
-        result.push(byte);
+        if count == scratch.len() {
+            return Err(anyhow!("varint exceeded maximum length"));
+        }
+        scratch[count] = byte;
+        count += 1;
         if byte & VAR_MASK == VAR_LAST {
             break;
         }
     }
-    Ok(result
-        .iter()
-        .rev()
-        .fold(0, |acc, &x| (acc << VAR_OFFSET) | (x & VAR_VAL_MASK) as u64))
+    let mut value: u64 = 0;
+    for &byte in scratch[..count].iter().rev() {
+        value = (value << VAR_OFFSET) | u64::from(byte & VAR_VAL_MASK);
+    }
+    Ok(value)
 }
 
 fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
@@ -90,8 +95,7 @@ fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
     Ok((from_prv, target_prv))
 }
 
-pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
-    let mut packet = Packet::new();
+pub fn read_packet(stream: &mut BufReader<File>, packet: &mut Packet) -> Result<()> {
     let first_byte = read_u8(stream)?;
     // trace!("first_byte: {:08b}", first_byte);
     let c_header = CHeader::from(first_byte & C_HEADER_MASK);
@@ -157,7 +161,7 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
             }
         }
     }
-    Ok(packet)
+    Ok(())
 }
 
 pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, DecoderRuntimeCfg)> {
