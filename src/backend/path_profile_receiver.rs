@@ -45,7 +45,7 @@ impl PathProfileReceiver {
         let unwinder =
             StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
         Self {
-            writer: BufWriter::new(File::create("trace.path_profile.txt").unwrap()),
+            writer: BufWriter::new(File::create("trace.path_profile.csv").unwrap()),
             receiver: BusReceiver {
                 name: "path_profile".to_string(),
                 bus_rx,
@@ -135,27 +135,15 @@ impl AbstractReceiver for PathProfileReceiver {
     }
 
     fn _flush(&mut self) {
+        // path net variation time(i)= total path execution time(i)–(path frequency(i) x (path basetime(i)))
+        self.writer.write_all(format!("count,mean,netvar,path\n").as_bytes()).unwrap();
         for (path, records) in self.path_records.iter() {
             // compute mean and standard deviation
             let mean = records.iter().sum::<u64>() as f64 / records.len() as f64;
-            let stddev = records
-                .iter()
-                .map(|&x| (x as f64 - mean).powi(2))
-                .sum::<f64>()
-                / records.len() as f64;
-            let stddev = stddev.sqrt();
+            let min = records.iter().min().unwrap();
+            let net_var = records.iter().sum::<u64>() as f64 - (records.len() as f64 * *min as f64);
             self.writer
-                .write_all(format!("path: {}\n", path.to_string()).as_bytes())
-                .unwrap();
-            self.writer
-                .write_all(format!("times: {:?}\n", records).as_bytes())
-                .unwrap();
-            self.writer
-                .write_all(format!("mean: {:2.2}, stddev: {:2.2}\n", mean, stddev).as_bytes())
-                .unwrap();
-            // self.writer.write_all(format!("branches: {:?}\n", path.branches).as_bytes()).unwrap();
-            self.writer
-                .write_all(format!("--------------------------------\n").as_bytes())
+                .write_all(format!("{}, {}, {}, {}\n", records.len(), mean, net_var, path.to_string()).as_bytes())
                 .unwrap();
         }
         self.writer.flush().unwrap();
