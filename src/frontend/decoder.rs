@@ -191,20 +191,20 @@ pub fn decode_trace(
         first_packet.timestamp,
     ));
     let mut packet = packet::Packet::new();
+    let mut bytes_read = 0;
 
     loop {
         match packet::read_packet(&mut trace_reader, &mut packet) {
-            Ok(_) => (),
+            Ok(n) => bytes_read += n,
             Err(_) => break,
         };
-        let current_position = trace_reader.stream_position()?;
-        if current_position.saturating_sub(last_progress_update) >= PROGRESS_UPDATE_STEP
-            || current_position == trace_file_size
+        if bytes_read.saturating_sub(last_progress_update) >= PROGRESS_UPDATE_STEP
+            || bytes_read == trace_file_size
         {
-            progress_bar.set_position(current_position);
-            last_progress_update = current_position;
+            progress_bar.set_position(bytes_read);
+            last_progress_update = bytes_read;
         }
-
+        
         debug!("packet: {:?}", packet);
         // packet_count += 1;
 
