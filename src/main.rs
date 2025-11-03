@@ -14,6 +14,7 @@ mod frontend {
     pub mod c_header;
     pub mod ctx_mode;
     pub mod decoder;
+    pub mod decoder_cache;
     pub mod f_header;
     pub mod packet;
     pub mod runtime_cfg;

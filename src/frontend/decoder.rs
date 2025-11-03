@@ -15,6 +15,7 @@ use crate::frontend::f_header::FHeader;
 use crate::frontend::packet;
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use crate::frontend::trap_type::TrapType;
+use crate::frontend::decoder_cache::DecoderCache;
 
 use rustc_data_structures::fx::FxHashMap;
 use rvdasm::insn::Insn;
@@ -94,15 +95,19 @@ fn refund_addr(addr: u64) -> u64 {
 }
 
 // step until encountering a br/jump
-fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode) -> u64 {
+fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode, decoder_cache: &mut DecoderCache) -> u64 {
+    let initial_pc = pc;
     let mut pc = pc;
+    if let Some(target_pc) = decoder_cache.get(pc) {
+        return *target_pc;
+    }
     let stop_on_ij = *br_mode == BrMode::BrTarget;
     loop {
         trace!("stepping bb pc: {:x}", pc);
         let insn = insn_map.get(&pc).unwrap();
         // bus.broadcast(Entry::instruction(insn, pc));
         if stop_on_ij {
-            if insn.is_branch() || insn.is_direct_jump() || insn.is_indirect_jump() {
+            if insn.is_cfc_insn() {
                 break;
             } else {
                 pc += insn.len as u64;
@@ -119,6 +124,7 @@ fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mo
             }
         }
     }
+    decoder_cache.insert(initial_pc, pc);
     pc
 }
 
@@ -163,6 +169,8 @@ pub fn decode_trace(
 ) -> Result<()> {
     // Open and parse the first packet (SyncStart)
     let trace_file = File::open(encoded_trace.clone())?;
+
+    let mut decoder_cache = DecoderCache::new();
 
     // get the file size
     let trace_file_size = trace_file.metadata()?.len();
@@ -248,6 +256,9 @@ pub fn decode_trace(
             let report_ctx = trap_type == TrapType::TReturn && packet.target_prv == Prv::PrvUser;
             if report_ctx {
                 if find_ctx(packet.target_ctx, &static_cfg) {
+                    if ctx != packet.target_ctx {
+                        decoder_cache.reset();
+                    }
                     ctx = packet.target_ctx;
                     u_unknown_ctx = false; // we now are in a known ctx
                     // decode_cache.flush(); // flush the decode cachedd after reporting the trap event with ctx
@@ -290,7 +301,7 @@ pub fn decode_trace(
                 packet.timestamp,
             ));
             for _ in 0..packet.timestamp {
-                let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode);
+                let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache);
                 pc.set_addr(new_pc);
                 let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
                 if !insn_to_resolve.is_branch() {
@@ -321,7 +332,7 @@ pub fn decode_trace(
             // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(EventKind::bpmiss(), timestamp));
-            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode);
+            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache);
             pc.set_addr(new_pc);
             let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             if !insn_to_resolve.is_branch() {
@@ -361,7 +372,7 @@ pub fn decode_trace(
                 continue;
             }
             // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
-            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode);
+            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache);
             pc.set_addr(new_pc);
             let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             timestamp += packet.timestamp;
