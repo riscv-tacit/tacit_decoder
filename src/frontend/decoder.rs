@@ -60,7 +60,7 @@ impl PC {
     }
 
     fn get_addr(&self) -> u64 {
-        // sign extend by the 40th bit
+        // sign extend by the ADDR_BITS-1th bit
         let sign_bit = self.addr >> (ADDR_BITS - 1);
         let extender = if sign_bit == 1 {
             SIGNED_ADDR_EXTENDER_MASK
@@ -254,6 +254,15 @@ pub fn decode_trace(
             };
             timestamp += packet.timestamp;
             let report_ctx = trap_type == TrapType::TReturn && packet.target_prv == Prv::PrvUser;
+            trace!("u_unknown_ctx: {}, ctx: {}", u_unknown_ctx, ctx);
+            prv = packet.target_prv;
+            pc.set_addr(trapping_pc);
+            let trapping_pc_to_report = pc.get_addr();
+            let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
+            pc.set_addr(new_pc);
+            let new_pc_to_report = pc.get_addr();
+            trace!("new set pc: {:x}", pc.get_addr());
+            curr_insn_map = get_insn_map(prv, ctx); // update the instruction map
             if report_ctx {
                 if find_ctx(packet.target_ctx, &static_cfg) {
                     if ctx != packet.target_ctx {
@@ -269,7 +278,7 @@ pub fn decode_trace(
                     EventKind::trap_with_ctx(
                         TrapReason::from(trap_type),
                         (prv, packet.target_prv),
-                        (pc.get_addr(), trapping_pc),
+                        (trapping_pc_to_report, new_pc_to_report),
                         packet.target_ctx,
                     ),
                     timestamp,
@@ -279,18 +288,11 @@ pub fn decode_trace(
                     EventKind::trap(
                         TrapReason::from(trap_type),
                         (prv, packet.target_prv),
-                        (pc.get_addr(), trapping_pc),
+                        (trapping_pc_to_report, new_pc_to_report),
                     ),
                     timestamp,
                 ));
             }
-            trace!("u_unknown_ctx: {}, ctx: {}", u_unknown_ctx, ctx);
-            prv = packet.target_prv;
-            pc.set_addr(trapping_pc);
-            let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
-            pc.set_addr(new_pc);
-            trace!("new set pc: {:x}", pc.get_addr());
-            curr_insn_map = get_insn_map(prv, ctx); // update the instruction map
             continue;
         }
 
@@ -427,12 +429,14 @@ pub fn decode_trace(
                     // let new_pc = (pc.get_addr() as i64
                     //     + insn_to_resolve.get_imm().unwrap().get_val_signed_imm() as i64)
                     //     as u64;
+                    let old_pc_to_report = pc.get_addr();
                     let new_pc = (pc.get_addr() as i64 + insn_to_resolve.offset as i64) as u64;
+                    pc.set_addr(new_pc);
+                    let new_pc_to_report = pc.get_addr();
                     bus.broadcast(Entry::event(
-                        EventKind::inferrable_jump((pc.get_addr(), new_pc)),
+                        EventKind::inferrable_jump((old_pc_to_report, new_pc_to_report)),
                         timestamp,
                     ));
-                    pc.set_addr(new_pc);
                 }
                 FHeader::FUj => {
                     if !insn_to_resolve.is_indirect_jump() {
@@ -445,11 +449,13 @@ pub fn decode_trace(
                         );
                     }
                     let new_pc = pc.compute_from_xored_target_addr(packet.target_address);
+                    let old_pc_to_report = pc.get_addr();
+                    pc.set_addr(new_pc);
+                    let new_pc_to_report = pc.get_addr();
                     bus.broadcast(Entry::event(
-                        EventKind::uninferable_jump((pc.get_addr(), new_pc)),
+                        EventKind::uninferable_jump((old_pc_to_report, new_pc_to_report)),
                         timestamp,
                     ));
-                    pc.set_addr(new_pc);
                 }
                 _ => {
                     bus.broadcast(Entry::event(EventKind::panic(), 0));

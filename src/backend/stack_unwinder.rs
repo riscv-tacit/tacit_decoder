@@ -129,7 +129,7 @@ impl StackUnwinder {
                 // if the stack prv is different, we are done
                 if frame.symbol.prv != self.curr_prv {
                     return Some(StackUpdateResult {
-                        frames_opened: Some(frame.clone()),
+                        frames_opened: None,
                         frames_closed: closed,
                     });
                 }
@@ -140,7 +140,7 @@ impl StackUnwinder {
                 {
                     if start <= target && end > target {
                         return Some(StackUpdateResult {
-                            frames_opened: Some(frame.clone()),
+                            frames_opened: None,
                             frames_closed: closed,
                         });
                     }
@@ -172,6 +172,7 @@ impl StackUnwinder {
                         frames_closed: Vec::new(),
                     });
                 } else {
+                    panic!("failed to push frame for exception or interrupt, got target 0x{:08x}", to_addr);
                     return None;
                 }
             }
