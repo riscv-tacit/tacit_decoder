@@ -7,12 +7,31 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::sync::Arc;
+use std::collections::BTreeMap;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct Path {
     entry_point: u64,
     name: String,
     branches: Vec<bool>,
+}
+
+pub struct PathStats {
+    count: u64,
+    min: u64,
+    sum: u64,
+}
+
+impl PathStats {
+    pub fn new(duration: u64) -> Self {
+        Self { count: 1, min: duration, sum: duration }
+    }
+
+    pub fn update(&mut self, duration: u64) {
+        self.count += 1;
+        self.min = self.min.min(duration);
+        self.sum += duration;
+    }
 }
 
 impl Path {
@@ -31,7 +50,7 @@ impl Path {
 pub struct PathProfileReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
-    path_records: HashMap<Path, Vec<u64>>,
+    path_records: HashMap<Path, PathStats>,
     unwinder: StackUnwinder,
     current_path: Option<Path>,
     current_start_time: u64,
@@ -70,9 +89,9 @@ impl PathProfileReceiver {
             // insert a record for this path
             let duration = end_timestamp - self.current_start_time;
             if let Some(records) = self.path_records.get_mut(&path) {
-                records.push(duration);
+                records.update(duration);
             } else {
-                self.path_records.insert(path, vec![duration]);
+                self.path_records.insert(path, PathStats::new(duration));
             }
         }
         self.current_path = None;
@@ -139,11 +158,9 @@ impl AbstractReceiver for PathProfileReceiver {
         self.writer.write_all(format!("count,mean,netvar,path\n").as_bytes()).unwrap();
         for (path, records) in self.path_records.iter() {
             // compute mean and standard deviation
-            let mean = records.iter().sum::<u64>() as f64 / records.len() as f64;
-            let min = records.iter().min().unwrap();
-            let net_var = records.iter().sum::<u64>() as f64 - (records.len() as f64 * *min as f64);
+            let net_var = records.sum as f64 - (records.count as f64 * records.min as f64);
             self.writer
-                .write_all(format!("{}, {}, {}, {}\n", records.len(), mean, net_var, path.to_string()).as_bytes())
+                .write_all(format!("{}, {}, {}, {}\n", records.count, records.sum as f64 / records.count as f64, net_var, path.to_string()).as_bytes())
                 .unwrap();
         }
         self.writer.flush().unwrap();
