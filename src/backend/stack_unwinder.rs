@@ -173,7 +173,6 @@ impl StackUnwinder {
                     });
                 } else {
                     panic!("failed to push frame for exception or interrupt, got target 0x{:08x}", to_addr);
-                    return None;
                 }
             }
             TrapReason::Return => {

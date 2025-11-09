@@ -12,10 +12,10 @@ use crate::common::static_cfg::DecoderStaticCfg;
 use crate::frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use crate::frontend::br_mode::BrMode;
 use crate::frontend::f_header::FHeader;
-use crate::frontend::packet;
+use crate::frontend::packet::{Packet, PacketReader, read_first_packet};
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use crate::frontend::trap_type::TrapType;
-use crate::frontend::decoder_cache::DecoderCache;
+use crate::frontend::decoder_cache::{BasicBlockStats, DecoderCache};
 
 use rustc_data_structures::fx::FxHashMap;
 use rvdasm::insn::Insn;
@@ -95,17 +95,20 @@ fn refund_addr(addr: u64) -> u64 {
 }
 
 // step until encountering a br/jump
-fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode, decoder_cache: &mut DecoderCache) -> u64 {
+fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mode: &BrMode, decoder_cache: &mut DecoderCache, insn_count: &mut u64) -> u64 {
     let initial_pc = pc;
     let mut pc = pc;
-    if let Some(target_pc) = decoder_cache.get(pc) {
-        return *target_pc;
+    if let Some(basic_block_stats) = decoder_cache.get(pc) {
+        *insn_count += basic_block_stats.num_instructions;
+        return basic_block_stats.target_pc;
     }
     let stop_on_ij = *br_mode == BrMode::BrTarget;
+    let mut num_instructions = 0;
     loop {
         trace!("stepping bb pc: {:x}", pc);
         let insn = insn_map.get(&pc).unwrap();
         // bus.broadcast(Entry::instruction(insn, pc));
+        num_instructions += 1;
         if stop_on_ij {
             if insn.is_cfc_insn() {
                 break;
@@ -124,7 +127,8 @@ fn step_bb(pc: u64, insn_map: &FxHashMap<u64, Insn>, bus: &mut Bus<Entry>, br_mo
             }
         }
     }
-    decoder_cache.insert(initial_pc, pc);
+    decoder_cache.insert(initial_pc, BasicBlockStats { target_pc: pc, num_instructions });
+    *insn_count += num_instructions;
     pc
 }
 
@@ -177,8 +181,9 @@ pub fn decode_trace(
     let progress_bar = ProgressBar::new(trace_file_size);
     progress_bar.set_style(ProgressStyle::default_bar().template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/green}] {bytes}/{total_bytes} ({eta})")?);
 
-    let mut trace_reader = BufReader::with_capacity(1 << 20, trace_file);
-    let (first_packet, first_runtime_cfg) = packet::read_first_packet(&mut trace_reader)?;
+    let trace_reader = BufReader::with_capacity(1 << 20, trace_file);
+    let mut packet_reader = PacketReader::new(trace_reader);
+    let (first_packet, first_runtime_cfg) = read_first_packet(&mut packet_reader.stream)?;
     const PROGRESS_UPDATE_STEP: u64 = 1 << 20; // throttle progress updates to ~1 MiB increments
     let mut last_progress_update = 0u64;
 
@@ -198,11 +203,12 @@ pub fn decode_trace(
         EventKind::sync_start(first_runtime_cfg, pc.get_addr(), prv, ctx),
         first_packet.timestamp,
     ));
-    let mut packet = packet::Packet::new();
+    let mut packet = Packet::new();
     let mut bytes_read = 0;
+    let mut insn_count = 0;
 
     loop {
-        match packet::read_packet(&mut trace_reader, &mut packet) {
+        match packet_reader.read_packet(&mut packet) {
             Ok(n) => bytes_read += n,
             Err(_) => break,
         };
@@ -303,7 +309,7 @@ pub fn decode_trace(
                 packet.timestamp,
             ));
             for _ in 0..packet.timestamp {
-                let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache);
+                let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache, &mut insn_count);
                 pc.set_addr(new_pc);
                 let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
                 if !insn_to_resolve.is_branch() {
@@ -334,7 +340,7 @@ pub fn decode_trace(
             // predicted miss
             timestamp += packet.timestamp;
             bus.broadcast(Entry::event(EventKind::bpmiss(), timestamp));
-            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache);
+            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache, &mut insn_count);
             pc.set_addr(new_pc);
             let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             if !insn_to_resolve.is_branch() {
@@ -374,7 +380,7 @@ pub fn decode_trace(
                 continue;
             }
             // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
-            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache);
+            let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache, &mut insn_count);
             pc.set_addr(new_pc);
             let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             timestamp += packet.timestamp;
@@ -468,5 +474,10 @@ pub fn decode_trace(
     drop(bus);
     // println!("[Success] Decoded {} packets", packet_count);
     progress_bar.finish_and_clear();
+    println!("insn_count: {}", insn_count);
+    println!("file size: {} bytes", trace_file_size);
+    println!("bits per instruction: {:.4}", trace_file_size as f64 * 8.0 / insn_count as f64);
+    println!("compressed packet count: {}", packet_reader.compressed_packet_count);
+    println!("full packet count: {}", packet_reader.full_packet_count);
     Ok(())
 }

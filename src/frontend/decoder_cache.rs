@@ -1,8 +1,13 @@
 use rustc_data_structures::fx::FxHashMap;
 use rvdasm::insn::Insn;
 
+pub struct BasicBlockStats {
+    pub target_pc: u64,
+    pub num_instructions: u64,
+}
+
 pub struct DecoderCache {
-    cache: FxHashMap<u64, u64>,
+    cache: FxHashMap<u64, BasicBlockStats>,
 }
 
 impl DecoderCache {
@@ -10,12 +15,12 @@ impl DecoderCache {
         Self { cache: FxHashMap::default() }
     }
 
-    pub fn get(&self, pc: u64) -> Option<&u64> {
+    pub fn get(&self, pc: u64) -> Option<&BasicBlockStats> {
         self.cache.get(&pc)
     }
 
-    pub fn insert(&mut self, pc: u64, target_pc: u64) {
-        self.cache.insert(pc, target_pc);
+    pub fn insert(&mut self, pc: u64, basic_block_stats: BasicBlockStats) {
+        self.cache.insert(pc, basic_block_stats);
     }
 
     pub fn contains_key(&self, pc: u64) -> bool {
