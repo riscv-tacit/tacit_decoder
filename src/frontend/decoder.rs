@@ -3,7 +3,7 @@ use bus::Bus;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, trace};
 use std::fs::File;
-use std::io::{BufReader, Seek};
+use std::io::BufReader;
 
 use crate::backend::event::{Entry, EventKind, TrapReason};
 use crate::common::insn_index::InstructionIndex;
@@ -137,13 +137,15 @@ fn step_bb_until(
     insn_map: &FxHashMap<u64, Insn>,
     target_pc: u64,
     bus: &mut Bus<Entry>,
+    insn_count: &mut u64,
 ) -> u64 {
     debug!("stepping bb from pc: {:x} until pc: {:x}", pc, target_pc);
     let mut pc = pc;
-
+    let mut num_instructions = 0;
     loop {
         let insn = insn_map.get(&pc).unwrap();
         // bus.broadcast(Entry::instruction(insn, pc));
+        num_instructions += 1;
         if insn.is_branch() || insn.is_direct_jump() {
             break;
         }
@@ -152,6 +154,7 @@ fn step_bb_until(
         }
         pc += insn.len as u64;
     }
+    *insn_count += num_instructions;
     pc
 }
 
@@ -205,11 +208,18 @@ pub fn decode_trace(
     ));
     let mut packet = Packet::new();
     let mut bytes_read = 0;
+    let mut known_ctx_bytes_read = 0;
     let mut insn_count = 0;
 
     loop {
         match packet_reader.read_packet(&mut packet) {
-            Ok(n) => bytes_read += n,
+            Ok(n) => 
+            {
+                bytes_read += n;
+                if !u_unknown_ctx {
+                    known_ctx_bytes_read += n;
+                }
+            }
             Err(_) => break,
         };
         if bytes_read.saturating_sub(last_progress_update) >= PROGRESS_UPDATE_STEP
@@ -232,6 +242,7 @@ pub fn decode_trace(
                 curr_insn_map,
                 refund_addr(packet.target_address),
                 &mut bus,
+                &mut insn_count,
             );
             pc.set_addr(new_pc);
             bus.broadcast(Entry::event(
@@ -245,7 +256,7 @@ pub fn decode_trace(
             let trapping_pc = refund_addr(packet.from_address);
             if !(u_unknown_ctx && prv == Prv::PrvUser) {
                 let new_pc =
-                    step_bb_until(pc.get_addr(), curr_insn_map, trapping_pc, &mut bus);
+                    step_bb_until(pc.get_addr(), curr_insn_map, trapping_pc, &mut bus, &mut insn_count);
                 assert!(
                     new_pc == trapping_pc,
                     "new_pc: {:x}, trapping_pc: {:x}",
@@ -376,7 +387,6 @@ pub fn decode_trace(
             // if we're in unknown ctx and we are in user priv, we should ingnore such packet
             if u_unknown_ctx && prv == Prv::PrvUser {
                 timestamp += packet.timestamp;
-                trace!("ignoring packet in unknown ctx");
                 continue;
             }
             // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
@@ -476,7 +486,8 @@ pub fn decode_trace(
     progress_bar.finish_and_clear();
     println!("insn_count: {}", insn_count);
     println!("file size: {} bytes", trace_file_size);
-    println!("bits per instruction: {:.4}", trace_file_size as f64 * 8.0 / insn_count as f64);
+    println!("known ctx bytes read: {} bytes", known_ctx_bytes_read);
+    println!("bits per instruction: {:.4}", known_ctx_bytes_read as f64 * 8.0 / insn_count as f64);
     println!("compressed packet count: {}", packet_reader.compressed_packet_count);
     println!("full packet count: {}", packet_reader.full_packet_count);
     Ok(())
