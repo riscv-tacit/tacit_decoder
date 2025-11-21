@@ -20,7 +20,7 @@
   "to_afdo": false,
   "gcno": "",
   "to_gcda": false,
-  "to_speedscope": false,
+  "to_speedscope": true,
   "to_perfetto": false,
   "to_foc": false,
   "to_vbb": false

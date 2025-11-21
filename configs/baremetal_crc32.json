@@ -1,7 +1,7 @@
 {
   "encoded_trace": "../../sims/vcs/trace_monitor_rockettile_0.encoded.trace",
   "application_binary_asid_tuples": [],
-  "sbi_binary": "../baremetal-ide/build/examples/pmu-tests/trace-hello.elf",
+  "sbi_binary": "../baremetal-ide/build/examples/embench/crc32.elf",
   "kernel_binary": "",
   "kernel_jump_label_patch_log": "",
   "driver_binary_entry_tuples": [],
@@ -13,7 +13,7 @@
   "to_afdo": false,
   "gcno": "",
   "to_gcda": false,
-  "to_speedscope": true,
+  "to_speedscope": false,
   "to_perfetto": false,
   "to_foc": false,
   "to_vbb": false
