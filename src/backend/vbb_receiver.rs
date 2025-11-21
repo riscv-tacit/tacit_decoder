@@ -23,7 +23,7 @@ pub struct VBBReceiver {
 impl VBBReceiver {
     pub fn new(bus_rx: BusReader<Entry>) -> Self {
         Self {
-            writer: BufWriter::new(File::create("trace.vbb.txt").unwrap()),
+            writer: BufWriter::new(File::create("trace.vbb.csv").unwrap()),
             receiver: BusReceiver {
                 name: "vbb".to_string(),
                 bus_rx,
@@ -107,6 +107,8 @@ impl AbstractReceiver for VBBReceiver {
     }
 
     fn _flush(&mut self) {
+        // write the header
+        self.writer.write_all(b"count,mean,netvar,bb\n").unwrap();
         for (bb, intervals) in self.bb_records.iter() {
             if intervals.is_empty() {
                 continue;
@@ -114,28 +116,20 @@ impl AbstractReceiver for VBBReceiver {
 
             // Calculate mean manually
             let sum: u64 = intervals.iter().sum();
+            let min = intervals.iter().min().unwrap();
             let mean = sum as f64 / intervals.len() as f64;
-
-            // Calculate standard deviation manually with a more stable algorithm
-            let variance = intervals
-                .iter()
-                .map(|&x| {
-                    let diff = x as f64 - mean;
-                    diff * diff
-                })
-                .sum::<f64>()
-                / intervals.len() as f64;
-            let stddev = variance.sqrt();
+            let count = intervals.len();
+            let netvar = sum - min * count as u64;
 
             self.writer
                 .write_all(
                     format!(
-                        "BB: {:#x}-{:#x}, MEAN: {}, COUNT: {}, STDDEV: {}\n",
+                        "{}, {}, {}, {:#x}-{:#x}\n",
+                        count,
+                        mean,
+                        netvar,
                         bb.start_addr,
                         bb.end_addr,
-                        mean,
-                        intervals.len(),
-                        stddev
                     )
                     .as_bytes(),
                 )
