@@ -96,7 +96,7 @@ pub fn build_single_symbol_index(
             if exec_secs.contains(&sec_idx) {
                 if let Ok(name) = symbol.name() {
                     // filter out ghost symbols
-                    if !name.starts_with("$x") {
+                    if !name.starts_with("$x") && !name.starts_with(".L") {
                         let addr = symbol.address();
                         // lookup source location (may return None)
                         let loc = loader.find_location(addr);
