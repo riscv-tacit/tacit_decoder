@@ -40,6 +40,14 @@ impl SymbolIndex {
         &self.u_symbol_map
     }
 
+    pub fn get_kernel_symbol_map(&self) -> &BTreeMap<u64, SymbolInfo> {
+        &self.k_symbol_map
+    }
+
+    pub fn get_machine_symbol_map(&self) -> &BTreeMap<u64, SymbolInfo> {
+        &self.m_symbol_map
+    }
+
     /// Return the half-open address range `[start, end)` for the function that
     /// begins at `addr`. The end is the start of the next symbol in that
     /// privilege space, or `u64::MAX` if this is the last symbol.
@@ -96,7 +104,7 @@ pub fn build_single_symbol_index(
             if exec_secs.contains(&sec_idx) {
                 if let Ok(name) = symbol.name() {
                     // filter out ghost symbols
-                    if !name.starts_with("$x") && !name.starts_with(".L") {
+                    if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L") {
                         let addr = symbol.address();
                         // lookup source location (may return None)
                         let loc = loader.find_location(addr);

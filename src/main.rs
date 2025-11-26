@@ -54,6 +54,7 @@ use clap::Parser;
 use object::Object;
 // path dependency
 use std::path::Path;
+use std::io::Write;
 // bus dependency
 use bus::Bus;
 use std::thread;
@@ -101,6 +102,9 @@ struct Args {
     // optionally write the final receiver config to JSON
     #[arg(long)]
     dump_effective_config: Option<String>,
+    // dump the symbol index to a JSON file
+    #[arg(long)]
+    dump_symbol_index: Option<String>,
     // print the header configuration and exit
     #[arg(long)]
     header_only: Option<bool>,
@@ -267,6 +271,21 @@ fn main() -> Result<()> {
     // Build symbol index once
     let symbol_index = common::symbol_index::build_symbol_index(static_cfg.clone())?;
     let symbol_index = std::sync::Arc::new(symbol_index);
+
+    if let Some(path) = &args.dump_symbol_index {
+        let mut f = std::fs::File::create(path)?;
+        for (asid, symbol_map) in symbol_index.get_user_symbol_map().iter() {
+            for (addr, symbol) in symbol_map.iter() {
+                writeln!(f, "{} 0x{:x} {}", symbol.name, addr, asid).unwrap();
+            }
+        }
+        for (addr, symbol) in symbol_index.get_kernel_symbol_map().iter() {
+            writeln!(f, "{} 0x{:x} {}", symbol.name, addr, 0).unwrap();
+        }
+        for (addr, symbol) in symbol_index.get_machine_symbol_map().iter() {
+            writeln!(f, "{} 0x{:x} {}", symbol.name, addr, 0).unwrap();
+        }
+    }
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
