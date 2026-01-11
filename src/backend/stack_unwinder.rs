@@ -93,7 +93,7 @@ impl StackUnwinder {
 
     pub fn step_ij(&mut self, to_addr: u64) -> Option<StackUpdateResult> {
         let frame = self.push_frame(self.curr_prv, self.curr_ctx, to_addr);
-        debug!("stack unwinder push frame {:?}", frame);
+        // debug!("stack unwinder push frame {:?}", frame);
         if let Some(frame) = frame {
             return Some(StackUpdateResult {
                 frames_opened: Some(frame),

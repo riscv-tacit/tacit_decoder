@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bus::Bus;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, trace};
+use log::{warn, debug, trace};
 use std::fs::File;
 use std::io::BufReader;
 
@@ -143,6 +143,7 @@ fn step_bb_until(
     let mut pc = pc;
     let mut num_instructions = 0;
     loop {
+        trace!("stepping bb pc: {:x}", pc);
         let insn = insn_map.get(&pc).unwrap();
         // bus.broadcast(Entry::instruction(insn, pc));
         num_instructions += 1;
@@ -216,11 +217,14 @@ pub fn decode_trace(
             Ok(n) => 
             {
                 bytes_read += n;
-                if !u_unknown_ctx {
+                if !u_unknown_ctx || prv != Prv::PrvUser {
                     known_ctx_bytes_read += n;
                 }
             }
-            Err(_) => break,
+            Err(_) => {
+                // panic!("error reading packet after reading {} bytes out of {} bytes", known_ctx_bytes_read, trace_file_size);
+                break;
+            }
         };
         if bytes_read.saturating_sub(last_progress_update) >= PROGRESS_UPDATE_STEP
             || bytes_read == trace_file_size
@@ -271,7 +275,8 @@ pub fn decode_trace(
             };
             timestamp += packet.timestamp;
             let report_ctx = trap_type == TrapType::TReturn && packet.target_prv == Prv::PrvUser;
-            trace!("u_unknown_ctx: {}, ctx: {}", u_unknown_ctx, ctx);
+            warn!("u_unknown_ctx: {}, ctx: {}", u_unknown_ctx, ctx);
+            let old_prv = prv;
             prv = packet.target_prv;
             pc.set_addr(trapping_pc);
             let trapping_pc_to_report = pc.get_addr();
@@ -294,7 +299,7 @@ pub fn decode_trace(
                 bus.broadcast(Entry::event(
                     EventKind::trap_with_ctx(
                         TrapReason::from(trap_type),
-                        (prv, packet.target_prv),
+                        (old_prv, packet.target_prv),
                         (trapping_pc_to_report, new_pc_to_report),
                         packet.target_ctx,
                     ),
@@ -304,7 +309,7 @@ pub fn decode_trace(
                 bus.broadcast(Entry::event(
                     EventKind::trap(
                         TrapReason::from(trap_type),
-                        (prv, packet.target_prv),
+                        (old_prv, packet.target_prv),
                         (trapping_pc_to_report, new_pc_to_report),
                     ),
                     timestamp,
@@ -392,6 +397,7 @@ pub fn decode_trace(
             // only enter here if we are either in a known ctx or we are in a unknown ctx and we are in a supervisor priv
             let new_pc = step_bb(pc.get_addr(), curr_insn_map, &mut bus, &br_mode, &mut decoder_cache, &mut insn_count);
             pc.set_addr(new_pc);
+            trace!("setting pc to: {:x}", pc.get_addr());
             let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
             timestamp += packet.timestamp;
             match packet.f_header {
@@ -414,6 +420,7 @@ pub fn decode_trace(
                         timestamp,
                     ));
                     pc.set_addr(new_pc);
+                    trace!("taken branch: {:x} -> {:x}", pc.get_addr(), new_pc);
                 }
                 FHeader::FNt => {
                     if !insn_to_resolve.is_branch() {
@@ -431,6 +438,7 @@ pub fn decode_trace(
                         timestamp,
                     ));
                     pc.set_addr(new_pc);
+                    trace!("non taken branch: {:x} -> {:x}", pc.get_addr(), new_pc);
                 }
                 FHeader::FIj => {
                     if !insn_to_resolve.is_direct_jump() {
@@ -453,6 +461,7 @@ pub fn decode_trace(
                         EventKind::inferrable_jump((old_pc_to_report, new_pc_to_report)),
                         timestamp,
                     ));
+                    trace!("inferrable jump: {:x} -> {:x}", old_pc_to_report, new_pc_to_report);
                 }
                 FHeader::FUj => {
                     if !insn_to_resolve.is_indirect_jump() {
@@ -472,6 +481,7 @@ pub fn decode_trace(
                         EventKind::uninferable_jump((old_pc_to_report, new_pc_to_report)),
                         timestamp,
                     ));
+                    trace!("uninferable jump: {:x} -> {:x}", old_pc_to_report, new_pc_to_report);
                 }
                 _ => {
                     bus.broadcast(Entry::event(EventKind::panic(), 0));

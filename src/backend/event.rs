@@ -200,3 +200,21 @@ impl From<TrapType> for TrapReason {
         }
     }
 }
+
+impl std::fmt::Display for EventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventKind::TakenBranch { arc } => write!(f, "TakenBranch: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::NonTakenBranch { arc } => write!(f, "NonTakenBranch: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::UninferableJump { arc } => write!(f, "UninferableJump: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::InferrableJump { arc } => write!(f, "InferrableJump: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::Trap { reason, prv_arc, arc, ctx } => write!(f, "Trap: {:#x} -> {:#x} ({:?} {:?})", arc.0, arc.1, reason, prv_arc),
+            EventKind::SyncStart { runtime_cfg, start_pc, start_prv, start_ctx } => write!(f, "SyncStart: {:#x} ({:?} {:?}) {:?}", start_pc, start_prv, start_ctx, runtime_cfg),
+            EventKind::SyncEnd { end_pc } => write!(f, "SyncEnd: {:#x}", end_pc),
+            EventKind::SyncPeriodic => write!(f, "SyncPeriodic"),
+            EventKind::BPHit { hit_count } => write!(f, "BPHit: {}", hit_count),
+            EventKind::BPMiss => write!(f, "BPMiss"),
+            EventKind::Panic => write!(f, "Panic"),
+        }
+    }
+}
