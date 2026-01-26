@@ -124,6 +124,8 @@ impl PacketReader {
                         let (target_ctx, count) = read_varint(&mut self.stream)?;
                         packet.target_ctx = target_ctx;
                         bytes_read += count;
+                        let _ = read_u8(&mut self.stream)?;
+                        bytes_read += 1;
                         let (target_address, count) = read_varint(&mut self.stream)?;
                         packet.target_address = target_address;
                         bytes_read += count;
