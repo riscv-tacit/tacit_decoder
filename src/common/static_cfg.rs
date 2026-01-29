@@ -21,6 +21,7 @@ pub struct DecoderStaticCfg {
     pub to_speedscope: bool,
     pub to_perfetto: bool,
     pub to_vbb: bool,
+    pub to_path_profile: bool,
 }
 
 pub fn load_file_config(path: &str) -> Result<DecoderStaticCfg> {

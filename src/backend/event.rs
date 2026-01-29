@@ -28,6 +28,7 @@ pub enum EventKind {
         reason: TrapReason,
         prv_arc: (Prv, Prv),
         arc: (u64, u64),
+        ctx: Option<u64>,
     },
     SyncStart {
         runtime_cfg: DecoderRuntimeCfg,
@@ -43,9 +44,6 @@ pub enum EventKind {
         hit_count: u64,
     },
     BPMiss,
-    ContextChange {
-        ctx: u64,
-    },
     Panic,
 }
 
@@ -95,10 +93,30 @@ impl EventKind {
             reason,
             prv_arc,
             arc,
+            ctx: None,
         }
     }
 
-    pub fn sync_start(runtime_cfg: DecoderRuntimeCfg, start_pc: u64, start_prv: Prv, start_ctx: u64) -> Self {
+    pub fn trap_with_ctx(
+        reason: TrapReason,
+        prv_arc: (Prv, Prv),
+        arc: (u64, u64),
+        ctx: u64,
+    ) -> Self {
+        EventKind::Trap {
+            reason,
+            prv_arc,
+            arc,
+            ctx: Some(ctx),
+        }
+    }
+
+    pub fn sync_start(
+        runtime_cfg: DecoderRuntimeCfg,
+        start_pc: u64,
+        start_prv: Prv,
+        start_ctx: u64,
+    ) -> Self {
         EventKind::SyncStart {
             runtime_cfg,
             start_pc,
@@ -111,9 +129,9 @@ impl EventKind {
         EventKind::SyncEnd { end_pc }
     }
 
-    pub fn sync_periodic() -> Self {
-        EventKind::SyncPeriodic
-    }
+    // pub fn sync_periodic() -> Self {
+    //     EventKind::SyncPeriodic
+    // }
 
     pub fn bphit(hit_count: u64) -> Self {
         EventKind::BPHit { hit_count }
@@ -123,53 +141,53 @@ impl EventKind {
         EventKind::BPMiss
     }
 
-    pub fn context_change(ctx: u64) -> Self {
-        EventKind::ContextChange { ctx }
-    }
+    // pub fn context_change(ctx: u64) -> Self {
+    //     EventKind::ContextChange { ctx }
+    // }
 
     pub fn panic() -> Self {
         EventKind::Panic
     }
 
     // getters
-    pub fn get_from_addr(&self) -> Option<u64> {
-        match self {
-            EventKind::TakenBranch { arc } => Some(arc.0),
-            EventKind::UninferableJump { arc } => Some(arc.0),
-            EventKind::InferrableJump { arc } => Some(arc.0),
-            _ => None,
-        }
-    }
+    // pub fn get_from_addr(&self) -> Option<u64> {
+    //     match self {
+    //         EventKind::TakenBranch { arc } => Some(arc.0),
+    //         EventKind::UninferableJump { arc } => Some(arc.0),
+    //         EventKind::InferrableJump { arc } => Some(arc.0),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_to_addr(&self) -> Option<u64> {
-        match self {
-            EventKind::TakenBranch { arc } => Some(arc.1),
-            EventKind::UninferableJump { arc } => Some(arc.1),
-            EventKind::InferrableJump { arc } => Some(arc.1),
-            _ => None,
-        }
-    }
+    // pub fn get_to_addr(&self) -> Option<u64> {
+    //     match self {
+    //         EventKind::TakenBranch { arc } => Some(arc.1),
+    //         EventKind::UninferableJump { arc } => Some(arc.1),
+    //         EventKind::InferrableJump { arc } => Some(arc.1),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_trap_reason(&self) -> Option<TrapReason> {
-        match self {
-            EventKind::Trap { reason, .. } => Some(reason.clone()),
-            _ => None,
-        }
-    }
+    // pub fn get_trap_reason(&self) -> Option<TrapReason> {
+    //     match self {
+    //         EventKind::Trap { reason, .. } => Some(reason.clone()),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_prv_arc(&self) -> Option<(Prv, Prv)> {
-        match self {
-            EventKind::Trap { prv_arc, .. } => Some(prv_arc.clone()),
-            _ => None,
-        }
-    }
+    // pub fn get_prv_arc(&self) -> Option<(Prv, Prv)> {
+    //     match self {
+    //         EventKind::Trap { prv_arc, .. } => Some(prv_arc.clone()),
+    //         _ => None,
+    //     }
+    // }
 
-    pub fn get_ctx(&self) -> Option<u64> {
-        match self {
-            EventKind::ContextChange { ctx } => Some(ctx.clone()),
-            _ => None,
-        }
-    }
+    // pub fn get_ctx(&self) -> Option<u64> {
+    //     match self {
+    //         EventKind::ContextChange { ctx } => Some(ctx.clone()),
+    //         _ => None,
+    //     }
+    // }
 }
 
 impl From<TrapType> for TrapReason {
@@ -179,6 +197,24 @@ impl From<TrapType> for TrapReason {
             TrapType::TInterrupt => TrapReason::Interrupt,
             TrapType::TReturn => TrapReason::Return,
             TrapType::TNone => panic!("TNone should not be converted to TrapReason"),
+        }
+    }
+}
+
+impl std::fmt::Display for EventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventKind::TakenBranch { arc } => write!(f, "TakenBranch: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::NonTakenBranch { arc } => write!(f, "NonTakenBranch: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::UninferableJump { arc } => write!(f, "UninferableJump: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::InferrableJump { arc } => write!(f, "InferrableJump: {:#x} -> {:#x}", arc.0, arc.1),
+            EventKind::Trap { reason, prv_arc, arc, ctx } => write!(f, "Trap: {:#x} -> {:#x} ({:?} {:?})", arc.0, arc.1, reason, prv_arc),
+            EventKind::SyncStart { runtime_cfg, start_pc, start_prv, start_ctx } => write!(f, "SyncStart: {:#x} ({:?} {:?}) {:?}", start_pc, start_prv, start_ctx, runtime_cfg),
+            EventKind::SyncEnd { end_pc } => write!(f, "SyncEnd: {:#x}", end_pc),
+            EventKind::SyncPeriodic => write!(f, "SyncPeriodic"),
+            EventKind::BPHit { hit_count } => write!(f, "BPHit: {}", hit_count),
+            EventKind::BPMiss => write!(f, "BPMiss"),
+            EventKind::Panic => write!(f, "Panic"),
         }
     }
 }

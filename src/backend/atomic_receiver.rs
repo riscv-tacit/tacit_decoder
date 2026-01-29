@@ -1,7 +1,6 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
-use crate::common::insn_index::InstructionIndex;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
 use std::fs::File;
@@ -19,9 +18,8 @@ impl AtomicReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
-        insns: Arc<InstructionIndex>,
     ) -> Self {
-        let unwinder = StackUnwinder::new(symbols, insns).expect("stack unwinder");
+        let unwinder = StackUnwinder::new(symbols).expect("stack unwinder");
         Self {
             writer: BufWriter::new(File::create("trace.atomics.txt").unwrap()),
             receiver: BusReceiver {

@@ -2,9 +2,11 @@ extern crate bus;
 extern crate clap;
 extern crate env_logger;
 extern crate gcno_reader;
+extern crate indicatif;
 extern crate log;
 extern crate object;
 extern crate rvdasm;
+extern crate rustc_data_structures;
 
 mod frontend {
     pub mod bp_double_saturating_counter;
@@ -12,6 +14,7 @@ mod frontend {
     pub mod c_header;
     pub mod ctx_mode;
     pub mod decoder;
+    pub mod decoder_cache;
     pub mod f_header;
     pub mod packet;
     pub mod runtime_cfg;
@@ -25,6 +28,7 @@ mod backend {
     pub mod atomic_receiver;
     pub mod event;
     pub mod gcda_receiver;
+    pub mod path_profile_receiver;
     pub mod perfetto_receiver;
     pub mod speedscope_receiver;
     pub mod stack_txt_receiver;
@@ -50,6 +54,7 @@ use clap::Parser;
 use object::Object;
 // path dependency
 use std::path::Path;
+use std::io::Write;
 // bus dependency
 use bus::Bus;
 use std::thread;
@@ -59,6 +64,7 @@ use backend::afdo_receiver::AfdoReceiver;
 use backend::atomic_receiver::AtomicReceiver;
 use backend::event::Entry;
 use backend::gcda_receiver::GcdaReceiver;
+use backend::path_profile_receiver::PathProfileReceiver;
 use backend::perfetto_receiver::PerfettoReceiver;
 use backend::speedscope_receiver::SpeedscopeReceiver;
 use backend::stack_txt_receiver::StackTxtReceiver;
@@ -96,6 +102,9 @@ struct Args {
     // optionally write the final receiver config to JSON
     #[arg(long)]
     dump_effective_config: Option<String>,
+    // dump the symbol index to a JSON file
+    #[arg(long)]
+    dump_symbol_index: Option<String>,
     // print the header configuration and exit
     #[arg(long)]
     header_only: Option<bool>,
@@ -132,6 +141,9 @@ struct Args {
     // output the decoded trace in vbb format
     #[arg(long)]
     to_vbb: Option<bool>,
+    // output the decoded trace in path profile format
+    #[arg(long)]
+    to_path_profile: Option<bool>,
 }
 
 fn main() -> Result<()> {
@@ -167,6 +179,7 @@ fn main() -> Result<()> {
     let to_speedscope = pick_arg(args.to_speedscope, file_cfg.to_speedscope);
     let to_perfetto = pick_arg(args.to_perfetto, file_cfg.to_perfetto);
     let to_vbb = pick_arg(args.to_vbb, file_cfg.to_vbb);
+    let to_path_profile = pick_arg(args.to_path_profile, file_cfg.to_path_profile);
     let static_cfg = DecoderStaticCfg {
         encoded_trace,
         application_binary_asid_tuples,
@@ -185,6 +198,7 @@ fn main() -> Result<()> {
         to_speedscope,
         to_perfetto,
         to_vbb,
+        to_path_profile,
     };
 
     // verify the binary exists and is a file
@@ -196,16 +210,18 @@ fn main() -> Result<()> {
             ));
         }
     }
-    if static_cfg.sbi_binary != "" && !Path::new(&static_cfg.sbi_binary).exists()
-        || !Path::new(&static_cfg.sbi_binary).is_file()
+    if static_cfg.sbi_binary != ""
+        && (!Path::new(&static_cfg.sbi_binary).exists()
+            || !Path::new(&static_cfg.sbi_binary).is_file())
     {
         return Err(anyhow::anyhow!(
             "SBI binary file is not valid: {}",
             static_cfg.sbi_binary
         ));
     }
-    if static_cfg.kernel_binary != "" && !Path::new(&static_cfg.kernel_binary).exists()
-        || !Path::new(&static_cfg.kernel_binary).is_file()
+    if static_cfg.kernel_binary != ""
+        && (!Path::new(&static_cfg.kernel_binary).exists()
+            || !Path::new(&static_cfg.kernel_binary).is_file())
     {
         return Err(anyhow::anyhow!(
             "Kernel binary file is not valid: {}",
@@ -231,7 +247,9 @@ fn main() -> Result<()> {
     let (first_packet, runtime_cfg) = {
         let trace_file = File::open(static_cfg.encoded_trace.clone())?;
         let mut trace_reader = BufReader::new(trace_file);
-        frontend::packet::read_first_packet(&mut trace_reader)?
+        let (first_packet, runtime_cfg) = frontend::packet::read_first_packet(&mut trace_reader)?;
+        drop(trace_reader);
+        (first_packet, runtime_cfg)
     };
 
     if static_cfg.header_only {
@@ -253,6 +271,21 @@ fn main() -> Result<()> {
     // Build symbol index once
     let symbol_index = common::symbol_index::build_symbol_index(static_cfg.clone())?;
     let symbol_index = std::sync::Arc::new(symbol_index);
+
+    if let Some(path) = &args.dump_symbol_index {
+        let mut f = std::fs::File::create(path)?;
+        for (asid, symbol_map) in symbol_index.get_user_symbol_map().iter() {
+            for (addr, symbol) in symbol_map.iter() {
+                writeln!(f, "{} 0x{:x} {}", symbol.name, addr, asid).unwrap();
+            }
+        }
+        for (addr, symbol) in symbol_index.get_kernel_symbol_map().iter() {
+            writeln!(f, "{} 0x{:x} {}", symbol.name, addr, 0).unwrap();
+        }
+        for (addr, symbol) in symbol_index.get_machine_symbol_map().iter() {
+            writeln!(f, "{} 0x{:x} {}", symbol.name, addr, 0).unwrap();
+        }
+    }
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
@@ -280,20 +313,17 @@ fn main() -> Result<()> {
 
     if to_stack_txt {
         let to_stack_txt_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let to_stack_txt_insn_index = std::sync::Arc::clone(&insn_index);
         let stack_txt_rx = StackTxtReceiver::new(
             bus.add_rx(),
             to_stack_txt_symbol_index,
-            to_stack_txt_insn_index,
         );
         receivers.push(Box::new(stack_txt_rx));
     }
 
     if to_atomics {
         let to_atomics_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let to_atomics_insn_index = std::sync::Arc::clone(&insn_index);
         let atomic_rx =
-            AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index, to_atomics_insn_index);
+            AtomicReceiver::new(bus.add_rx(), to_atomics_symbol_index);
         receivers.push(Box::new(atomic_rx));
     }
 
@@ -322,28 +352,32 @@ fn main() -> Result<()> {
     if to_speedscope {
         let speedscope_bus_endpoint = bus.add_rx();
         let speedscope_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let speedscope_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(SpeedscopeReceiver::new(
             speedscope_bus_endpoint,
             speedscope_symbol_index,
-            speedscope_insn_index,
         )));
     }
 
     if to_perfetto {
         let perfetto_bus_endpoint = bus.add_rx();
         let perfetto_symbol_index = std::sync::Arc::clone(&symbol_index);
-        let perfetto_insn_index = std::sync::Arc::clone(&insn_index);
         receivers.push(Box::new(PerfettoReceiver::new(
             perfetto_bus_endpoint,
             perfetto_symbol_index,
-            perfetto_insn_index,
         )));
     }
 
     if to_vbb {
         let vbb_bus_endpoint = bus.add_rx();
         receivers.push(Box::new(VBBReceiver::new(vbb_bus_endpoint)));
+    }
+    if to_path_profile {
+        let path_profile_bus_endpoint = bus.add_rx();
+        let path_profile_symbol_index = std::sync::Arc::clone(&symbol_index);
+        receivers.push(Box::new(PathProfileReceiver::new(
+            path_profile_bus_endpoint,
+            path_profile_symbol_index,
+        )));
     }
 
     let encoded_trace_path = static_cfg.encoded_trace.clone();

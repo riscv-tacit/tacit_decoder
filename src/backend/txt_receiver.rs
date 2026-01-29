@@ -57,9 +57,9 @@ impl AbstractReceiver for TxtReceiver {
                     .unwrap();
                 // write the event
                 self.writer
-                    .write_all(format!(" {:?}", kind).as_bytes())
+                    .write_all(format!(" {}", kind).as_bytes())
                     .unwrap();
-                self.writer.write_all(b"| ").unwrap();
+                self.writer.write_all(b"\n").unwrap();
             }
         }
     }

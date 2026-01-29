@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::trace;
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -6,7 +6,6 @@ use std::io::{BufReader, Read};
 use crate::common::prv::*;
 use crate::frontend::br_mode::*;
 use crate::frontend::c_header::*;
-use crate::frontend::ctx_mode::*;
 use crate::frontend::f_header::*;
 use crate::frontend::runtime_cfg::*;
 use crate::frontend::sync_type::*;
@@ -28,7 +27,7 @@ pub struct Packet {
     pub target_address: u64,
     pub from_address: u64,
     pub target_prv: Prv,
-    pub from_ctx: u64, // used for debugging only
+    pub _from_ctx: u64, // used for debugging only
     pub target_ctx: u64,
     pub from_prv: Prv,
     pub timestamp: u64,
@@ -36,16 +35,16 @@ pub struct Packet {
 
 // Initialize a packet with default values
 impl Packet {
-    fn new() -> Packet {
+    pub fn new() -> Packet {
         Packet {
             is_compressed: false,
             c_header: CHeader::CNa,
-            f_header: FHeader::FRes,
+            f_header: FHeader::FRes1,
             func3: SubFunc3::None,
             target_address: 0,
             from_address: 0,
             target_prv: Prv::PrvUser,
-            from_ctx: 0,
+            _from_ctx: 0,
             target_ctx: 0,
             from_prv: Prv::PrvUser,
             timestamp: 0,
@@ -64,21 +63,134 @@ const VAR_LAST: u8 = 0b1000_0000;
 const VAR_OFFSET: u8 = 7;
 const VAR_VAL_MASK: u8 = 0b0111_1111;
 
-fn read_varint(stream: &mut BufReader<File>) -> Result<u64> {
-    trace!("reading varint");
-    let mut result = Vec::new();
+pub struct PacketReader {
+    pub stream: BufReader<File>,
+    pub compressed_packet_count: u64,
+    pub full_packet_count: u64,
+}
+
+impl PacketReader {
+    pub fn new(stream: BufReader<File>) -> Self {
+        Self { stream, compressed_packet_count: 0, full_packet_count: 0 }
+    }
+
+    pub fn read_packet(&mut self, packet: &mut Packet) -> Result<(u64)> {
+        let first_byte = read_u8(&mut self.stream)?;
+        // trace!("first_byte: {:08b}", first_byte);
+        let mut bytes_read = 1;
+        let c_header = CHeader::from(first_byte & C_HEADER_MASK);
+        match c_header {
+            CHeader::CTb | CHeader::CNt | CHeader::CIj => {
+                packet.timestamp = (first_byte & C_TIMESTAMP_MASK) as u64 >> 2;
+                packet.f_header = FHeader::from(c_header.clone());
+                packet.c_header = c_header.clone();
+                packet.is_compressed = true;
+                self.compressed_packet_count += 1;
+            }
+            CHeader::CNa => {
+                packet.is_compressed = false;
+                self.full_packet_count += 1;
+                let f_header = FHeader::from((first_byte & F_HEADER_MASK) >> FHEADER_OFFSET);
+                match f_header {
+                    FHeader::FTb | FHeader::FNt | FHeader::FIj => {
+                        let (timestamp, count) = read_varint(&mut self.stream)?;
+                        packet.timestamp = timestamp;
+                        bytes_read += count;
+                        packet.f_header = f_header;
+                        packet.c_header = CHeader::CNa;
+                    }
+                    FHeader::FUj => {
+                        let (target_address, count) = read_varint(&mut self.stream)?;
+                        packet.target_address = target_address;
+                        bytes_read += count;
+                        let (timestamp, count) = read_varint(&mut self.stream)?;
+                        packet.timestamp = timestamp;
+                        bytes_read += count;
+                        packet.f_header = f_header;
+                        packet.c_header = CHeader::CNa;
+                    }
+                    FHeader::FSync => {
+                        let sync_type =
+                            SyncType::from((first_byte & SYNC_TYPE_MASK) >> SYNC_TYPE_OFFSET);
+                        assert!(
+                            sync_type != SyncType::SyncStart,
+                            "SyncStart should not be observed other than in read_first_packet"
+                        );
+                        packet.func3 = SubFunc3::SyncType(sync_type);
+                        let (from_prv, target_prv) = read_prv(&mut self.stream)?;
+                        assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
+                        packet.from_prv = from_prv;
+                        packet.target_prv = target_prv;
+                        let (target_ctx, count) = read_varint(&mut self.stream)?;
+                        packet.target_ctx = target_ctx;
+                        bytes_read += count;
+                        let _ = read_u8(&mut self.stream)?;
+                        bytes_read += 1;
+                        let (target_address, count) = read_varint(&mut self.stream)?;
+                        packet.target_address = target_address;
+                        bytes_read += count;
+                        let (timestamp, count) = read_varint(&mut self.stream)?;
+                        packet.timestamp = timestamp;
+                        bytes_read += count;
+                        packet.f_header = f_header;
+                        packet.c_header = CHeader::CNa;
+                    }
+                    FHeader::FTrap => {
+                        let trap_type =
+                            TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
+                        packet.func3 = SubFunc3::TrapType(trap_type);
+                        let (from_prv, target_prv) = read_prv(&mut self.stream)?;
+                        packet.from_prv = from_prv;
+                        bytes_read += 1;
+                        packet.target_prv = target_prv;
+                        if trap_type == TrapType::TReturn && target_prv == Prv::PrvUser {
+                            let (target_ctx, count) = read_varint(&mut self.stream)?;
+                            packet.target_ctx = target_ctx;
+                            bytes_read += count;
+                        }
+                        let (from_address, count) = read_varint(&mut self.stream)?;
+                        packet.from_address = from_address;
+                        bytes_read += count;
+                        let (target_address, count) = read_varint(&mut self.stream)?;
+                        packet.target_address = target_address;
+                        bytes_read += count;
+                        let (timestamp, count) = read_varint(&mut self.stream)?;
+                        packet.timestamp = timestamp;
+                        bytes_read += count;
+                        packet.f_header = f_header;
+                        packet.c_header = CHeader::CNa;
+                    }
+                    _ => {
+                        panic!("Invalid FHeader value: {}", first_byte);
+                    }
+                }
+            }
+        }
+        Ok(bytes_read)
+    }
+    
+}
+
+
+fn read_varint(stream: &mut BufReader<File>) -> Result<(u64, u64)> {
+    let mut scratch = [0u8; 10];
+    let mut count = 0usize;
     loop {
         let byte = read_u8(stream)?;
-        trace!("byte: {:08b}", byte);
-        result.push(byte);
+        if count == scratch.len() {
+            return Err(anyhow!("varint exceeded maximum length"));
+        }
+        scratch[count] = byte;
+        count += 1;
         if byte & VAR_MASK == VAR_LAST {
             break;
         }
     }
-    Ok(result
-        .iter()
-        .rev()
-        .fold(0, |acc, &x| (acc << VAR_OFFSET) | (x & VAR_VAL_MASK) as u64))
+    let mut value: u64 = 0;
+    for &byte in scratch[..count].iter().rev() {
+        value = (value << VAR_OFFSET) | u64::from(byte & VAR_VAL_MASK);
+    }
+    Ok((value, count as u64))
 }
 
 fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
@@ -92,85 +204,15 @@ fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
     Ok((from_prv, target_prv))
 }
 
-pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
-    let mut packet = Packet::new();
-    let first_byte = read_u8(stream)?;
-    trace!("first_byte: {:08b}", first_byte);
-    let c_header = CHeader::from(first_byte & C_HEADER_MASK);
-    match c_header {
-        CHeader::CTb | CHeader::CNt | CHeader::CIj => {
-            packet.timestamp = (first_byte & C_TIMESTAMP_MASK) as u64 >> 2;
-            packet.f_header = FHeader::from(c_header.clone());
-            packet.c_header = c_header.clone();
-            packet.is_compressed = true;
-        }
-        CHeader::CNa => {
-            packet.is_compressed = false;
-            let f_header = FHeader::from((first_byte & F_HEADER_MASK) >> FHEADER_OFFSET);
-            match f_header {
-                FHeader::FTb | FHeader::FNt | FHeader::FIj => {
-                    packet.timestamp = read_varint(stream)?;
-                    packet.f_header = f_header;
-                    packet.c_header = CHeader::CNa;
-                }
-                FHeader::FUj => {
-                    packet.target_address = read_varint(stream)?;
-                    packet.timestamp = read_varint(stream)?;
-                    packet.f_header = f_header;
-                    packet.c_header = CHeader::CNa;
-                }
-                FHeader::FSync => {
-                    let sync_type =
-                        SyncType::from((first_byte & SYNC_TYPE_MASK) >> SYNC_TYPE_OFFSET);
-                    assert!(
-                        sync_type != SyncType::SyncStart,
-                        "SyncStart should not be observed other than in read_first_packet"
-                    );
-                    packet.func3 = SubFunc3::SyncType(sync_type);
-                    let (from_prv, target_prv) = read_prv(stream)?;
-                    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
-                    packet.from_prv = from_prv;
-                    packet.target_prv = target_prv;
-                    packet.target_ctx = read_varint(stream)?;
-                    packet.target_address = read_varint(stream)?;
-                    packet.timestamp = read_varint(stream)?;
-                    packet.f_header = f_header;
-                    packet.c_header = CHeader::CNa;
-                }
-                FHeader::FTrap => {
-                    let trap_type =
-                        TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
-                    packet.func3 = SubFunc3::TrapType(trap_type);
-                    let (from_prv, target_prv) = read_prv(stream)?;
-                    packet.from_prv = from_prv;
-                    packet.target_prv = target_prv;
-                    packet.target_address = read_varint(stream)?;
-                    packet.from_address = read_varint(stream)?;
-                    packet.timestamp = read_varint(stream)?;
-                    packet.f_header = f_header;
-                    packet.c_header = CHeader::CNa;
-                }
-                FHeader::FCtx => {
-                    packet.from_ctx = read_varint(stream)?;
-                    packet.target_ctx = read_varint(stream)?;
-                    packet.timestamp = read_varint(stream)?;
-                    packet.f_header = f_header;
-                    packet.c_header = CHeader::CNa;
-                }
-                _ => {
-                    panic!("Invalid FHeader value: {}", first_byte);
-                }
-            }
-        }
-    }
-    Ok(packet)
-}
+// returns the number of bytes read
+
 
 pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, DecoderRuntimeCfg)> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
     trace!("first_byte: {:08b}", first_byte);
-
+    let mut bytes_read = 1;
+    
     let c_header = CHeader::from(first_byte & C_HEADER_MASK);
     if c_header != CHeader::CNa {
         return Err(anyhow::anyhow!(
@@ -206,16 +248,27 @@ pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, Decode
 
     let (from_prv, target_prv) = read_prv(stream)?;
     packet.from_prv = from_prv;
-    assert!(from_prv == Prv::PrvUser, "from_prv should be PrvUser");
+    assert!(
+        from_prv == Prv::PrvUser,
+        "from_prv should be PrvUser, got {:?}",
+        from_prv
+    );
+    bytes_read += 1;
+    trace!("target_prv: {:?}", target_prv);
     packet.target_prv = target_prv;
-    packet.target_ctx = read_varint(stream)?;
-    packet.target_address = read_varint(stream)?;
-    packet.timestamp = read_varint(stream)?;
+    let (target_ctx, count) = read_varint(stream)?;
+    packet.target_ctx = target_ctx;
+    bytes_read += count;
+    let runtime_cfg_raw = read_u8(stream)?;
+    let br_mode = BrMode::from((runtime_cfg_raw & BP_MODE_MASK) as u64);
+    let bp_entries = ((runtime_cfg_raw & BP_ENTRY_MASK) >> BP_ENTRY_OFFSET) as u64 * BP_BASE_VALUE;
 
-    let br_mode_raw = read_varint(stream)?;
-    let br_mode = BrMode::from(br_mode_raw);
-
-    let bp_entries = read_varint(stream)?;
+    let (target_address, count) = read_varint(stream)?;
+    packet.target_address = target_address;
+    bytes_read += count;
+    let (timestamp, count) = read_varint(stream)?;
+    packet.timestamp = timestamp;
+    bytes_read += count;
 
     Ok((
         packet,

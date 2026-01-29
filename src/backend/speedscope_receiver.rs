@@ -1,7 +1,6 @@
 use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
 use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
-use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
@@ -30,7 +29,11 @@ struct Lookup {
 impl Lookup {
     fn lookup(&self, prv: Prv, ctx: u64, addr: u64) -> Option<u32> {
         match prv {
-            Prv::PrvUser => self.u_lookup.get(&ctx).and_then(|lookup| lookup.get(&addr)).copied(),
+            Prv::PrvUser => self
+                .u_lookup
+                .get(&ctx)
+                .and_then(|lookup| lookup.get(&addr))
+                .copied(),
             Prv::PrvSupervisor => self.k_lookup.get(&addr).copied(),
             Prv::PrvMachine => self.m_lookup.get(&addr).copied(),
             _ => panic!("Unsupported privilege level: {:?}", prv),
@@ -53,12 +56,11 @@ impl SpeedscopeReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
-        insns: Arc<InstructionIndex>,
     ) -> Self {
         debug!("SpeedscopeReceiver::new");
 
         let unwinder =
-            StackUnwinder::new(Arc::clone(&symbols), Arc::clone(&insns)).expect("stack unwinder");
+            StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
 
         let (frames, frame_lookup) = build_frames(&symbols);
 
@@ -91,7 +93,7 @@ impl SpeedscopeReceiver {
             }
         }
 
-        for frame in update.frames_opened {
+        if let Some(frame) = update.frames_opened {
             if let Some(id) = self.lookup_frame(&frame) {
                 self.events.push(ProfileEvent {
                     kind: "O".into(),
@@ -105,7 +107,9 @@ impl SpeedscopeReceiver {
     }
 
     fn lookup_frame(&self, frame: &Frame) -> Option<u32> {
-        let id = self.frame_lookup.lookup(frame.symbol.prv, frame.symbol.ctx, frame.addr);
+        let id = self
+            .frame_lookup
+            .lookup(frame.symbol.prv, frame.symbol.ctx, frame.addr);
         id
     }
 }
@@ -180,8 +184,6 @@ impl AbstractReceiver for SpeedscopeReceiver {
     }
 }
 
-
-
 /// Build Speedscope frames and an address→frame-id lookup.
 fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
     let mut frames = Vec::new();
@@ -196,7 +198,7 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
             "file": info.src.file,
             "line": info.src.lines,
         }));
-        k_lookup.insert( addr, id);
+        k_lookup.insert(addr, id);
     }
 
     for (&addr, info) in symbols.get(Prv::PrvMachine, 0).iter() {
@@ -206,7 +208,7 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
             "file": info.src.file,
             "line": info.src.lines,
         }));
-        m_lookup.insert( addr, id);
+        m_lookup.insert(addr, id);
     }
     // iterate over the user space symbol map
     for (&asid, user_symbol_map) in symbols.get_user_symbol_map().iter() {
@@ -218,7 +220,7 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
                 "file": info.src.file,
                 "line": info.src.lines,
             }));
-            u_lookup.insert( addr, id);
+            u_lookup.insert(addr, id);
         }
         u_lookups.insert(asid, u_lookup);
     }

@@ -13,7 +13,7 @@ authors = ["iansseijelly"]
 
 [dependencies]
 object = "0.36"
-rvdasm = "0.2.1"
+rvdasm = "0.2.6"
 clap = { version = "4.5.32", features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 bus = "2.4.1"
@@ -25,3 +25,5 @@ gcno_reader = { path = "crates/gcno_reader" }
 addr2line = "0.24.2"
 indexmap = "2.7.0"
 jsonschema = "0.17"
+indicatif = "0.18.0"
+rustc_data_structures = "0.1.2"

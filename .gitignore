@@ -14,3 +14,5 @@ target-rust-analyzer/
 *.afdo
 *.log
 *.speedscope.json
+*.csv
+

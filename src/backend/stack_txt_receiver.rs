@@ -6,7 +6,6 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::sync::Arc;
 
-use crate::common::insn_index::InstructionIndex;
 use crate::common::symbol_index::SymbolIndex;
 
 pub struct StackTxtReceiver {
@@ -19,9 +18,8 @@ impl StackTxtReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
-        insns: Arc<InstructionIndex>,
     ) -> Self {
-        let unwinder = StackUnwinder::new(symbols, insns).expect("init unwinder");
+        let unwinder = StackUnwinder::new(symbols).expect("init unwinder");
         Self {
             writer: BufWriter::new(File::create("trace.stack.txt").unwrap()),
             receiver: BusReceiver {
@@ -58,7 +56,7 @@ impl StackTxtReceiver {
             .unwrap();
         }
 
-        for frame in update.frames_opened {
+        if let Some(frame) = update.frames_opened {
             writeln!(
                 self.writer,
                 "[ts {ts}] push {:?} :: {} @ 0x{:x}",

@@ -1,7 +1,7 @@
 use crate::common::prv::*;
 use crate::common::static_cfg::DecoderStaticCfg;
 use anyhow::Result;
-use log::debug;
+use log::{debug, trace};
 use object::elf::SHF_EXECINSTR;
 use object::{Object, ObjectSection};
 use rvdasm::disassembler::*;
@@ -9,17 +9,25 @@ use rvdasm::insn::Insn;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
+use rustc_data_structures::fx::FxHashMap;
 
 pub struct InstructionIndex {
-    u_insn_maps: HashMap<u64, HashMap<u64, Insn>>,
-    k_insn_map: HashMap<u64, Insn>,
-    m_insn_map: HashMap<u64, Insn>,
+    u_insn_maps: HashMap<u64, FxHashMap<u64, Insn>>,
+    k_insn_map: FxHashMap<u64, Insn>,
+    m_insn_map: FxHashMap<u64, Insn>,
+    empty_map: FxHashMap<u64, Insn>,
 }
 
 impl InstructionIndex {
-    pub fn get(&self, space: Prv, ctx: u64) -> &HashMap<u64, Insn> {
+    pub fn get(&self, space: Prv, ctx: u64) -> &FxHashMap<u64, Insn> {
         match space {
-            Prv::PrvUser => &self.u_insn_maps[&ctx],
+            Prv::PrvUser => {
+                if self.u_insn_maps.contains_key(&ctx) {
+                    &self.u_insn_maps[&ctx]
+                } else {
+                    &self.empty_map
+                }
+            }
             Prv::PrvSupervisor => &self.k_insn_map,
             Prv::PrvMachine => &self.m_insn_map,
             _ => panic!("Unsupported privilege level: {:?}", space),
@@ -48,7 +56,8 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         .ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
     let m_text_data = m_text_section.data()?;
     let m_entry_point = m_elf.entry();
-    let m_insn_map = dasm.disassemble_all(&m_text_data, m_entry_point);
+    let mut m_insn_map = FxHashMap::default();
+    m_insn_map.extend(dasm.disassemble_all(&m_text_data, m_entry_point));
     if m_insn_map.is_empty() {
         return Err(anyhow::anyhow!(
             "No executable instructions found in SBI ELF"
@@ -71,7 +80,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
             "User and machine ELF architectures must match"
         );
         // User-space instruction map
-        let mut u_insn_map = HashMap::new();
+        let mut u_insn_map = FxHashMap::default();
         for section in u_elf.sections() {
             if let object::SectionFlags::Elf { sh_flags } = section.flags() {
                 if sh_flags & (SHF_EXECINSTR as u64) != 0 {
@@ -96,7 +105,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         u_insn_maps.insert(asid.parse::<u64>()?, u_insn_map);
     }
 
-    let mut k_insn_map = HashMap::new();
+    let mut k_insn_map = FxHashMap::default();
     // Kernel-space instruction map
     if cfg.kernel_binary != "" {
         let mut k_elf_file = File::open(cfg.kernel_binary)?;
@@ -156,7 +165,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
             );
             k_insn_map.extend(driver_insn_map);
         }
-        
+
         // Apply kernel jump label patch log
         if cfg.kernel_jump_label_patch_log != "" {
             let jump_label_patch_log = File::open(cfg.kernel_jump_label_patch_log)?;
@@ -166,18 +175,27 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
                 let parts = line.split(',').collect::<Vec<&str>>();
                 let addr = u64::from_str_radix(parts[0], 16)?;
                 let raw_insn = u32::from_str_radix(parts[1], 16)?;
-                let new_insn = dasm.disassmeble_one(raw_insn).unwrap();
-                k_insn_map.insert(addr, new_insn);
+                // trace!("patching kernel-space instruction at {:#x} with {:#x}", addr, raw_insn);
+                let new_insn = dasm.disassmeble_one(raw_insn);
+                if let Some(new_insn) = new_insn {
+                    k_insn_map.insert(addr, new_insn);
+                } else {
+                    trace!(
+                        "error disassembling instruction at {:#x}: {:#x}",
+                        addr,
+                        raw_insn
+                    );
+                    continue;
+                }
             }
             debug!("[insn_index] patched kernel-space instructions");
         }
     }
 
-    
-
     Ok(InstructionIndex {
         u_insn_maps,
         k_insn_map,
         m_insn_map,
+        empty_map: FxHashMap::default(),
     })
 }

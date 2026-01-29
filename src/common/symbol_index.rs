@@ -40,6 +40,14 @@ impl SymbolIndex {
         &self.u_symbol_map
     }
 
+    pub fn get_kernel_symbol_map(&self) -> &BTreeMap<u64, SymbolInfo> {
+        &self.k_symbol_map
+    }
+
+    pub fn get_machine_symbol_map(&self) -> &BTreeMap<u64, SymbolInfo> {
+        &self.m_symbol_map
+    }
+
     /// Return the half-open address range `[start, end)` for the function that
     /// begins at `addr`. The end is the start of the next symbol in that
     /// privilege space, or `u64::MAX` if this is the last symbol.
@@ -73,7 +81,8 @@ pub fn build_single_symbol_index(
     let elf_data = fs::read(&elf_path)?;
     let obj_file = object::File::parse(&*elf_data)?;
     debug!("elf_path: {}", elf_path);
-    let loader = Loader::new(&elf_path).map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
+    let loader = Loader::new(&elf_path)
+        .map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
 
     // Gather indices of all executable sections
     let exec_secs: std::collections::HashSet<_> = obj_file
@@ -95,7 +104,7 @@ pub fn build_single_symbol_index(
             if exec_secs.contains(&sec_idx) {
                 if let Ok(name) = symbol.name() {
                     // filter out ghost symbols
-                    if !name.starts_with("$x") {
+                    if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L") {
                         let addr = symbol.address();
                         // lookup source location (may return None)
                         let loc = loader.find_location(addr);
@@ -143,17 +152,25 @@ pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
         u_symbol_maps.insert(asid.parse::<u64>()?, u_func_symbol_map);
         debug!("u_symbol_maps size: {}", u_symbol_maps.len());
     }
-    let mut k_func_symbol_map =
-        build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
-    debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
-    for (binary, entry) in cfg.driver_binary_entry_tuples {
-        let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
-        let func_symbol_map =
-            build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point, 0)?;
-        k_func_symbol_map.extend(func_symbol_map);
+    let mut k_func_symbol_map = BTreeMap::new();
+    if cfg.kernel_binary != "" {
+        k_func_symbol_map =
+            build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
         debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
+        for (binary, entry) in cfg.driver_binary_entry_tuples {
+            let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
+            let func_symbol_map = build_single_symbol_index(
+                binary.clone(),
+                Prv::PrvSupervisor,
+                driver_entry_point,
+                0,
+            )?;
+            k_func_symbol_map.extend(func_symbol_map);
+            debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
+        }
     }
-    let m_func_symbol_map = build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0 )?;
+    let m_func_symbol_map =
+        build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0)?;
     Ok(SymbolIndex {
         u_symbol_map: u_symbol_maps,
         k_symbol_map: k_func_symbol_map,
