@@ -1,4 +1,4 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
 use bus::BusReader;
 use std::fs::File;
@@ -9,10 +9,11 @@ pub struct TxtReceiver {
     receiver: BusReceiver,
 }
 
+/* Receiver for dumping the trace to a text file */
 impl TxtReceiver {
-    pub fn new(bus_rx: BusReader<Entry>) -> Self {
+    pub fn new(bus_rx: BusReader<Entry>, path: String) -> Self {
         Self {
-            writer: BufWriter::new(File::create("trace.txt").unwrap()),
+            writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
                 name: "txt".to_string(),
                 bus_rx: bus_rx,
@@ -21,6 +22,17 @@ impl TxtReceiver {
         }
     }
 }
+
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.txt").to_string();
+    Box::new(TxtReceiver::new(bus_rx, path))
+}
+
+crate::register_receiver!("txt", factory);
 
 impl AbstractReceiver for TxtReceiver {
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {
