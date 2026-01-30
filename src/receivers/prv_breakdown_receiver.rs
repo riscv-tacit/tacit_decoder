@@ -69,10 +69,13 @@ impl AbstractReceiver for PrvBreakdownReceiver {
     }
 
     fn _flush(&mut self) {
+      println!("--------------------------------");
+      println!("Privilege level breakdown:");
       let total_cycles = self.u_prv_cycles + self.k_prv_cycles + self.m_prv_cycles;
       println!("User privilege level cycles: {} ({:.2}%)", self.u_prv_cycles, self.u_prv_cycles as f64 / total_cycles as f64 * 100.0);
       println!("Supervisor privilege level cycles: {} ({:.2}%)", self.k_prv_cycles, self.k_prv_cycles as f64 / total_cycles as f64 * 100.0);
       println!("Machine privilege level cycles: {} ({:.2}%)", self.m_prv_cycles, self.m_prv_cycles as f64 / total_cycles as f64 * 100.0);
+      println!("--------------------------------");
     }
 }
 

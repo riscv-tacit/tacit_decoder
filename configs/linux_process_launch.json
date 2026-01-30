@@ -19,7 +19,8 @@
     ["../firemarshal/images/firechip/process-launch/iceblk-dwarf", "0xffffffff016ac000"]
   ],
   "receivers": {
-    "txt": { "enabled": true, "path": "trace.test.txt" },
-    "prv_breakdown": { "enabled": true }
+    "txt": { "enabled": false, "path": "trace.test.txt" },
+    "prv_breakdown": { "enabled": true },
+    "speedscope": { "enabled": true, "path": "trace.speedscope.json" }
   }
 }

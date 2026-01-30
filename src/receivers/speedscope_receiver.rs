@@ -1,6 +1,6 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
-use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
+use crate::receivers::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
 use crate::common::prv::Prv;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
@@ -56,6 +56,7 @@ impl SpeedscopeReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
+        path: String,
     ) -> Self {
         debug!("SpeedscopeReceiver::new");
 
@@ -65,7 +66,7 @@ impl SpeedscopeReceiver {
         let (frames, frame_lookup) = build_frames(&symbols);
 
         Self {
-            writer: BufWriter::new(File::create("trace.speedscope.json").unwrap()),
+            writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
                 name: "speedscope".into(),
                 bus_rx,
@@ -79,7 +80,20 @@ impl SpeedscopeReceiver {
             unwinder,
         }
     }
+}
 
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.speedscope.json").to_string();
+    Box::new(SpeedscopeReceiver::new(bus_rx, _shared.symbol_index.clone(), path))
+}
+
+crate::register_receiver!("speedscope", factory);
+
+impl SpeedscopeReceiver {
     fn record_stack_update(&mut self, ts: u64, update: StackUpdateResult) {
         for frame in update.frames_closed {
             if let Some(id) = self.lookup_frame(&frame) {

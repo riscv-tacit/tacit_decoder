@@ -26,7 +26,6 @@ mod receivers;
 
 mod backend {
     pub mod event;
-    pub mod stack_unwinder;
 }
 
 mod common {
@@ -185,12 +184,7 @@ fn main() -> Result<()> {
     };
 
     if !receiver_cfg.is_null() {
-        let shared = receivers::abstract_receiver::Shared {
-            static_cfg: static_cfg.clone(),
-            runtime_cfg: runtime_cfg.clone(),
-            symbol_index: None,
-            insn_index: None,
-        };
+        let shared = receivers::abstract_receiver::Shared::new(&static_cfg, &runtime_cfg)?;
 
         let receiver_map = receiver_cfg.as_object().ok_or_else(|| {
             anyhow::anyhow!("receivers config must be an object map of name -> config")

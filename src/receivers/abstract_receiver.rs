@@ -46,48 +46,17 @@ pub trait AbstractReceiver: Send + 'static {
 pub struct Shared {
     pub static_cfg: DecoderStaticCfg,
     pub runtime_cfg: DecoderRuntimeCfg,
-    pub symbol_index: Option<Arc<SymbolIndex>>,
-    pub insn_index: Option<Arc<InstructionIndex>>,
+    pub symbol_index: Arc<SymbolIndex>,
+    pub insn_index: Arc<InstructionIndex>,
 }
 
-pub struct SharedBuilder {
-    static_cfg: DecoderStaticCfg,
-    runtime_cfg: DecoderRuntimeCfg,
-    symbol_index: Option<Arc<SymbolIndex>>,
-    insn_index: Option<Arc<InstructionIndex>>
-}
-
-impl SharedBuilder {
-    pub fn new(static_cfg: DecoderStaticCfg, runtime_cfg: DecoderRuntimeCfg) -> Self {
-        Self {
-            static_cfg,
-            runtime_cfg,
-            symbol_index: None,
-            insn_index: None,
-        }
-    }
-
-    pub fn with_symbol_index(mut self) -> Result<Self> {
-        if self.symbol_index.is_none() {
-            self.symbol_index = Some(Arc::new(build_symbol_index(self.static_cfg.clone())?));
-        }
-        Ok(self)
-    }
-
-    pub fn with_insn_index(mut self) -> Result<Self> {
-        if self.insn_index.is_none() {
-            self.insn_index =
-                Some(Arc::new(build_instruction_index(self.static_cfg.clone())?));
-        }
-        Ok(self)
-    }
-
-    pub fn build(self) -> Shared {
-        Shared {
-            static_cfg: self.static_cfg,
-            runtime_cfg: self.runtime_cfg,
-            symbol_index: self.symbol_index,
-            insn_index: self.insn_index,
-        }
+impl Shared {
+    pub fn new(static_cfg: &DecoderStaticCfg, runtime_cfg: &DecoderRuntimeCfg) -> Result<Self> {
+        Ok(Self {
+            static_cfg: static_cfg.clone(),
+            runtime_cfg: runtime_cfg.clone(),
+            symbol_index: Arc::new(build_symbol_index(static_cfg.clone())?),
+            insn_index: Arc::new(build_instruction_index(static_cfg.clone())?),
+        })
     }
 }
