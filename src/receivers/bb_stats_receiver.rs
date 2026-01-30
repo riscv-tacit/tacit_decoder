@@ -1,4 +1,4 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
 
 use bus::BusReader;
@@ -12,7 +12,8 @@ pub struct BB {
     end_addr: u64,
 }
 
-pub struct VBBReceiver {
+/* Receiver for answering the question: "How many cycles were executed in each basic block?" */
+pub struct BBStatsReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
     bb_records: HashMap<BB, Vec<u64>>,
@@ -20,12 +21,12 @@ pub struct VBBReceiver {
     prev_timestamp: u64,
 }
 
-impl VBBReceiver {
-    pub fn new(bus_rx: BusReader<Entry>) -> Self {
+impl BBStatsReceiver {
+    pub fn new(bus_rx: BusReader<Entry>, path: String) -> Self {
         Self {
-            writer: BufWriter::new(File::create("trace.vbb.csv").unwrap()),
+            writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
-                name: "vbb".to_string(),
+                name: "bb_stats".to_string(),
                 bus_rx,
                 checksum: 0,
             },
@@ -34,7 +35,20 @@ impl VBBReceiver {
             prev_timestamp: 0,
         }
     }
+}
 
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.bb_stats.csv").to_string();
+    Box::new(BBStatsReceiver::new(bus_rx, path))
+}
+
+crate::register_receiver!("bb_stats", factory);
+
+impl BBStatsReceiver {
     fn update_bb_records(&mut self, from_addr: u64, to_addr: u64, timestamp: u64) {
         let bb = BB {
             start_addr: self.prev_addr,
@@ -54,7 +68,7 @@ impl VBBReceiver {
     }
 }
 
-impl AbstractReceiver for VBBReceiver {
+impl AbstractReceiver for BBStatsReceiver {
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {
         &mut self.receiver.bus_rx
     }
