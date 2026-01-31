@@ -1,13 +1,12 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
-use crate::backend::stack_unwinder::StackUnwinder;
+use crate::receivers::stack_unwinder::StackUnwinder;
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::sync::Arc;
-use std::collections::BTreeMap;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct Path {
@@ -60,11 +59,12 @@ impl PathProfileReceiver {
     pub fn new(
         bus_rx: BusReader<Entry>,
         symbols: Arc<SymbolIndex>,
+        path: String,
     ) -> Self {
         let unwinder =
             StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
         Self {
-            writer: BufWriter::new(File::create("trace.path_profile.csv").unwrap()),
+            writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
                 name: "path_profile".to_string(),
                 bus_rx,
@@ -76,7 +76,19 @@ impl PathProfileReceiver {
             current_start_time: 0,
         }
     }
+}
 
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.path_profile.csv").to_string();
+    Box::new(PathProfileReceiver::new(bus_rx, _shared.symbol_index.clone(), path))
+}
+crate::register_receiver!("path_profile", factory);
+
+impl PathProfileReceiver {
     fn record_branch(&mut self, taken: bool) {
         // peek the top of the current paths
         if let Some(ref mut path) = self.current_path {
