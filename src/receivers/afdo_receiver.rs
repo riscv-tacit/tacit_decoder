@@ -1,4 +1,4 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
 use bus::BusReader;
 use std::collections::HashMap;
@@ -29,7 +29,20 @@ impl AfdoReceiver {
             elf_start: elf_start,
         }
     }
+}
 
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    let elf_start = _config.get("elf_start").and_then(|value| value.as_u64()).unwrap_or(0);
+    Box::new(AfdoReceiver::new(bus_rx, elf_start))
+}
+
+crate::register_receiver!("afdo", factory);
+
+impl AfdoReceiver {
     pub fn update_records(&mut self, from_addr: u64, to_addr: u64, timestamp: u64) {
         self.range_map
             .entry((self.last_record.1, to_addr))

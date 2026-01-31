@@ -21,6 +21,7 @@
   "receivers": {
     "txt": { "enabled": false, "path": "trace.test.txt" },
     "prv_breakdown": { "enabled": true },
-    "speedscope": { "enabled": true, "path": "trace.speedscope.json" }
+    "speedscope": { "enabled": true, "path": "trace.speedscope.json" },
+    "bb_stats": { "enabled": false, "path": "trace.bb_stats.csv", "asid_of_interest": [106], "do_user": true}
   }
 }

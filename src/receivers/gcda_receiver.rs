@@ -1,4 +1,4 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
 use addr2line::Loader;
 use bus::BusReader;
@@ -62,7 +62,20 @@ impl GcdaReceiver {
             cfg: cfg,
         }
     }
+}
 
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    let gcno_path = _config.get("gcno_path").and_then(|value| value.as_str()).unwrap_or("trace.gcno.txt").to_string();
+    let elf_path = _config.get("elf_path").and_then(|value| value.as_str()).unwrap_or("trace.elf.txt").to_string();
+    Box::new(GcdaReceiver::new(bus_rx, gcno_path, elf_path))
+}
+crate::register_receiver!("gcda", factory);
+
+impl GcdaReceiver {
     pub fn update_edge_map(&mut self, from_addr: u64, to_addr: u64) {
         let from_source: SourceLocation =
             SourceLocation::from_addr2line(self.loader.find_location(from_addr).unwrap());

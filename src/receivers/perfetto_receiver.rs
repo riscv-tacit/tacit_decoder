@@ -1,4 +1,4 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
 use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
 use crate::common::symbol_index::SymbolIndex;
@@ -40,7 +40,19 @@ impl PerfettoReceiver {
             last_ts: 0,
         }
     }
+}
 
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    Box::new(PerfettoReceiver::new(bus_rx, Arc::clone(&_shared.symbol_index)))
+}
+
+crate::register_receiver!("perfetto", factory);
+
+impl PerfettoReceiver {
     fn drain_update(&mut self, ts: u64, update: StackUpdateResult) {
         for frame in update.frames_closed {
             self.emit_end(ts, &frame);

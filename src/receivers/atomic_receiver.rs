@@ -1,6 +1,6 @@
-use crate::backend::abstract_receiver::{AbstractReceiver, BusReceiver};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
-use crate::backend::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
+use crate::receivers::stack_unwinder::{Frame, StackUnwinder, StackUpdateResult};
 use crate::common::symbol_index::SymbolIndex;
 use bus::BusReader;
 use std::fs::File;
@@ -31,7 +31,17 @@ impl AtomicReceiver {
             last_ts: 0,
         }
     }
+}
+pub fn factory(
+    _shared: &Shared,
+    _config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver> {
+    Box::new(AtomicReceiver::new(bus_rx, Arc::clone(&_shared.symbol_index)))
+}
+crate::register_receiver!("atomic", factory);
 
+impl AtomicReceiver {
     fn is_atomic_insn(insn: &rvdasm::insn::Insn) -> bool {
         let name = insn.get_name();
         name.starts_with("lr.") || name.starts_with("sc.") || name.starts_with("amo")

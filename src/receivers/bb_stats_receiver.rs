@@ -1,5 +1,6 @@
 use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
+use crate::common::prv::Prv;
 
 use bus::BusReader;
 use std::collections::HashMap;
@@ -19,10 +20,13 @@ pub struct BBStatsReceiver {
     bb_records: HashMap<BB, Vec<u64>>,
     prev_addr: u64,
     prev_timestamp: u64,
+    asid_of_interest: Vec<u64>,
+    prv_of_interest: Vec<Prv>,
+    interested: bool
 }
 
 impl BBStatsReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, path: String) -> Self {
+    pub fn new(bus_rx: BusReader<Entry>, path: String, asid_of_interest: Vec<u64>, prv_of_interest: Vec<Prv>) -> Self {
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
@@ -33,6 +37,9 @@ impl BBStatsReceiver {
             bb_records: HashMap::new(),
             prev_addr: 0,
             prev_timestamp: 0,
+            asid_of_interest: asid_of_interest,
+            prv_of_interest: prv_of_interest,
+            interested: false,
         }
     }
 }
@@ -43,7 +50,18 @@ pub fn factory(
     bus_rx: BusReader<Entry>,
 ) -> Box<dyn AbstractReceiver> {
     let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.bb_stats.csv").to_string();
-    Box::new(BBStatsReceiver::new(bus_rx, path))
+    let asid_of_interest = _config.get("asid_of_interest").and_then(|value| value.as_array()).unwrap_or(&vec![]).iter().map(|value| value.as_u64().unwrap()).collect();
+    let mut prv_of_interest = vec![];
+    if _config.get("do_user").and_then(|value| value.as_bool()).unwrap_or(false) {
+        prv_of_interest.push(Prv::PrvUser);
+    }
+    if _config.get("do_supervisor").and_then(|value| value.as_bool()).unwrap_or(false) {
+        prv_of_interest.push(Prv::PrvSupervisor);
+    }
+    if _config.get("do_machine").and_then(|value| value.as_bool()).unwrap_or(false) {
+        prv_of_interest.push(Prv::PrvMachine);
+    }
+    Box::new(BBStatsReceiver::new(bus_rx, path, asid_of_interest, prv_of_interest))
 }
 
 crate::register_receiver!("bb_stats", factory);
@@ -115,6 +133,23 @@ impl AbstractReceiver for BBStatsReceiver {
                 kind: EventKind::NonTakenBranch { arc },
             } => {
                 self.update_bb_records(arc.0, arc.1, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::Trap { reason, prv_arc, arc, ctx },
+            } => {
+                if self.prv_of_interest.contains(&prv_arc.1) {
+                    if prv_arc.1 == Prv::PrvUser {
+                        if self.asid_of_interest.contains(&ctx.unwrap()) {
+                            self.interested = true;
+                        }
+                    } else {
+                        self.interested = true;
+                    }
+                }
+                // drop the last bb, but update prev_addr and prev_timestamp
+                self.prev_addr = arc.1;
+                self.prev_timestamp = timestamp;
             }
             _ => {}
         }

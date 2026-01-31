@@ -5,16 +5,7 @@
   "kernel_binary": "",
   "kernel_jump_label_patch_log": "",
   "driver_binary_entry_tuples": [],
-  "header_only": false,
-  "to_stats": false,
-  "to_txt": false,
-  "to_stack_txt": false,
-  "to_atomics": false,
-  "to_afdo": false,
-  "gcno": "",
-  "to_gcda": false,
-  "to_speedscope": true,
-  "to_perfetto": false,
-  "to_foc": false,
-  "to_vbb": true
+  "receivers": {
+    "speedscope": { "enabled": true, "path": "trace.foc.speedscope.json" }
+  }
 }
