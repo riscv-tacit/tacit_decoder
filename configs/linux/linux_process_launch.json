@@ -2,14 +2,14 @@
   "encoded_trace": "/scratch/iansseijelly/FIRESIM_RUN_TMP/sim_slot_1/tacit0.out",
   "application_binary_asid_tuples": [
     ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/trace-submit", "106"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "107"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "108"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "109"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "110"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "111"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "112"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "113"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "114"]
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "237"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "238"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "239"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "240"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "241"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "242"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "243"],
+    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "244"]
   ],
   "sbi_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin",
   "kernel_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin-dwarf",
@@ -22,6 +22,6 @@
     "txt": { "enabled": false, "path": "trace.test.txt" },
     "prv_breakdown": { "enabled": true },
     "speedscope": { "enabled": true, "path": "trace.speedscope.json" },
-    "bb_stats": { "enabled": false, "path": "trace.bb_stats.csv", "asid_of_interest": [106], "do_user": true}
+    "bb_stats": { "enabled": false, "path": "trace.bb_stats.csv", "do_supervisor": true}
   }
 }

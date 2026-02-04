@@ -136,7 +136,7 @@ impl AbstractReceiver for BBStatsReceiver {
             }
             Entry::Event {
                 timestamp,
-                kind: EventKind::Trap { reason, prv_arc, arc, ctx },
+                kind: EventKind::Trap { reason: _, prv_arc, arc, ctx },
             } => {
                 if self.prv_of_interest.contains(&prv_arc.1) {
                     if prv_arc.1 == Prv::PrvUser {
