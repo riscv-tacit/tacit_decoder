@@ -1,0 +1,20 @@
+{
+  "encoded_trace": "/scratch/iansseijelly/FIRESIM_RUN_TMP/sim_slot_1/tacit0.out",
+  "user_binaries": [
+    {"binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/trace-submit", "asids": [106]},
+    {"binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "asids": [677, 678, 679, 680, 681, 682, 683, 684]}
+  ],
+  "machine_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin",
+  "kernel_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin-dwarf",
+  "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-01-28--19-09-05-process-launch/process-launch-run-chores/jump_label_patch_map.txt",
+  "driver_binary_entry_tuples": [
+    ["../firemarshal/images/firechip/process-launch/tacit-dwarf", "0xffffffff0169d000"],
+    ["../firemarshal/images/firechip/process-launch/iceblk-dwarf", "0xffffffff016ac000"]
+  ],
+  "receivers": {
+    "txt": { "enabled": false, "path": "trace.test.txt" },
+    "prv_breakdown": { "enabled": true },
+    "speedscope": { "enabled": true, "path": "trace.speedscope.json" },
+    "bb_stats": { "enabled": false, "path": "trace.bb_stats.csv", "do_supervisor": true}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "encoded_trace": "/scratch/iansseijelly/tacit-chipyard/software/baremetal-ide/tacit.out",
+  "user_binaries": [],
+  "machine_binary": "../../software/baremetal-ide/build/examples/freertos/freertos_demo.elf",
+  "kernel_binary": "",
+  "kernel_jump_label_patch_log": "",
+  "driver_binary_entry_tuples": [],
+  "receivers": {
+    "speedscope": { "enabled": true, "path": "trace.freertos.speedscope.json" }
+  }
+}

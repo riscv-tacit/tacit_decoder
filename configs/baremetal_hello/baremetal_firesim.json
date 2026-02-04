@@ -1,0 +1,11 @@
+{
+  "encoded_trace": "/scratch/iansseijelly/FIRESIM_RUN_TMP/sim_slot_0/tacit0.out",
+  "user_binaries": [],
+  "machine_binary": "../firemarshal/example-workloads/bare-hello/trace-hello.elf",
+  "kernel_binary": "",
+  "kernel_jump_label_patch_log": "",
+  "driver_binary_entry_tuples": [],
+  "receivers": {
+    "txt": { "enabled": true, "path": "trace.trace_hello.txt" }
+  }
+}

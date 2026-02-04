@@ -20,6 +20,7 @@ use crate::frontend::decoder_cache::{BasicBlockStats, DecoderCache};
 use rustc_data_structures::fx::FxHashMap;
 use rvdasm::insn::Insn;
 use std::sync::Arc;
+use std::collections::HashSet;
 
 // const ADDR_BITS: u64 = 64;
 const ADDR_BITS: u64 = 40;
@@ -159,13 +160,8 @@ fn step_bb_until(
     pc
 }
 
-fn find_ctx(ctx: u64, static_cfg: &DecoderStaticCfg) -> bool {
-    for (_, asid) in static_cfg.application_binary_asid_tuples.iter() {
-        if asid.parse::<u64>().unwrap() == ctx {
-            return true;
-        }
-    }
-    false
+fn find_ctx(ctx: u64, valid_ctxs: &HashSet<u64>) -> bool {
+    valid_ctxs.contains(&ctx)
 }
 
 pub fn decode_trace(
@@ -194,6 +190,14 @@ pub fn decode_trace(
     let br_mode = runtime_cfg.br_mode;
     let mode_is_predict = br_mode == BrMode::BrPredict;
     let mut bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
+
+    // Build a set of what ctx is valid
+    let mut valid_ctxs = HashSet::new();
+    for user_binary in static_cfg.user_binaries.iter() {
+        for asid in user_binary.asids.iter() {
+            valid_ctxs.insert(*asid);
+        }
+    }
 
     // initial state from first packet
     // let mut packet_count = 0u64;
@@ -286,7 +290,7 @@ pub fn decode_trace(
             trace!("new set pc: {:x}", pc.get_addr());
             curr_insn_map = get_insn_map(prv, ctx); // update the instruction map
             if report_ctx {
-                if find_ctx(packet.target_ctx, &static_cfg) {
+                if find_ctx(packet.target_ctx, &valid_ctxs) {
                     if ctx != packet.target_ctx {
                         decoder_cache.reset();
                     }

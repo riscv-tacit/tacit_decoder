@@ -12,7 +12,8 @@ use std::io::{BufRead, BufReader, Read};
 use rustc_data_structures::fx::FxHashMap;
 
 pub struct InstructionIndex {
-    u_insn_maps: HashMap<u64, FxHashMap<u64, Insn>>,
+    asid_to_binary_id_map: HashMap<u64, usize>,
+    u_insn_maps: Vec<FxHashMap<u64, Insn>>,
     k_insn_map: FxHashMap<u64, Insn>,
     m_insn_map: FxHashMap<u64, Insn>,
     empty_map: FxHashMap<u64, Insn>,
@@ -22,8 +23,8 @@ impl InstructionIndex {
     pub fn get(&self, space: Prv, ctx: u64) -> &FxHashMap<u64, Insn> {
         match space {
             Prv::PrvUser => {
-                if self.u_insn_maps.contains_key(&ctx) {
-                    &self.u_insn_maps[&ctx]
+                if let Some(binary_id) = self.asid_to_binary_id_map.get(&ctx) {
+                    &self.u_insn_maps[*binary_id]
                 } else {
                     &self.empty_map
                 }
@@ -37,7 +38,7 @@ impl InstructionIndex {
 
 pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex> {
     // Machine-space instruction map (SBI)
-    let mut m_elf_file = File::open(cfg.sbi_binary)?;
+    let mut m_elf_file = File::open(cfg.machine_binary)?;
     let mut m_elf_buffer = Vec::new();
     m_elf_file.read_to_end(&mut m_elf_buffer)?;
     let m_elf = object::File::parse(&*m_elf_buffer)?;
@@ -67,10 +68,18 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         "[insn_index] found {} machine-space instructions",
         m_insn_map.len()
     );
+
+    // Build a asid to binary id map
+    let mut asid_to_binary_id_map = HashMap::new();
+    for (i, user_binary) in cfg.user_binaries.iter().enumerate() {
+        for asid in user_binary.asids.clone() {
+            asid_to_binary_id_map.insert(asid, i);
+        }
+    }
     // Determine architecture and create a disassembler from the application binary
-    let mut u_insn_maps = HashMap::new();
-    for (binary, asid) in cfg.application_binary_asid_tuples.clone() {
-        let mut u_elf_file = File::open(binary)?;
+    let mut u_insn_maps = Vec::new();
+    for user_binary in cfg.user_binaries.iter() {
+        let mut u_elf_file = File::open(user_binary.binary.clone())?;
         let mut u_elf_buffer = Vec::new();
         u_elf_file.read_to_end(&mut u_elf_buffer)?;
         let u_elf = object::File::parse(&*u_elf_buffer)?;
@@ -102,7 +111,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
                 "No executable instructions found in app ELF"
             ));
         }
-        u_insn_maps.insert(asid.parse::<u64>()?, u_insn_map);
+        u_insn_maps.push(u_insn_map);
     }
 
     let mut k_insn_map = FxHashMap::default();
@@ -193,6 +202,7 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
     }
 
     Ok(InstructionIndex {
+        asid_to_binary_id_map,
         u_insn_maps,
         k_insn_map,
         m_insn_map,
