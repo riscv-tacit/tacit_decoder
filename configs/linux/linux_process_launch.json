@@ -1,17 +1,10 @@
 {
   "encoded_trace": "/scratch/iansseijelly/FIRESIM_RUN_TMP/sim_slot_1/tacit0.out",
-  "application_binary_asid_tuples": [
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/trace-submit", "106"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "237"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "238"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "239"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "240"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "241"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "242"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "243"],
-    ["../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "244"]
+  "user_binaries": [
+    {"binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/trace-submit", "asids": [106]},
+    {"binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy", "asids": [677, 678, 679, 680, 681, 682, 683, 684]}
   ],
-  "sbi_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin",
+  "machine_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin",
   "kernel_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin-dwarf",
   "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-01-28--19-09-05-process-launch/process-launch-run-chores/jump_label_patch_map.txt",
   "driver_binary_entry_tuples": [

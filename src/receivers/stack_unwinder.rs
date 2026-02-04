@@ -10,6 +10,8 @@ use crate::common::symbol_index::{SymbolIndex, SymbolInfo};
 pub struct Frame {
     pub symbol: SymbolInfo,
     pub addr: u64,
+    pub ctx: u64,
+    pub prv: Prv,
 }
 
 pub struct StackUnwinder {
@@ -46,6 +48,8 @@ impl StackUnwinder {
             let frame = Frame {
                 symbol: symbol.clone(),
                 addr: *start,
+                ctx: ctx,
+                prv: prv,
             };
             self.frame_stack.push(frame.clone());
             Some(frame)

@@ -88,21 +88,22 @@ fn main() -> Result<()> {
     };
 
     // verify the binary exists and is a file
-    for (binary, _) in static_cfg.application_binary_asid_tuples.clone() {
-        if !Path::new(&binary).exists() || !Path::new(&binary).is_file() {
+    for user_binary in static_cfg.user_binaries.clone() {
+        let binary_path = user_binary.binary;
+        if !Path::new(&binary_path).exists() || !Path::new(&binary_path).is_file() {
             return Err(anyhow::anyhow!(
                 "Application binary file is not valid: {}",
-                binary
+                binary_path
             ));
         }
     }
-    if static_cfg.sbi_binary != ""
-        && (!Path::new(&static_cfg.sbi_binary).exists()
-            || !Path::new(&static_cfg.sbi_binary).is_file())
+    if static_cfg.machine_binary != ""
+        && (!Path::new(&static_cfg.machine_binary).exists()
+            || !Path::new(&static_cfg.machine_binary).is_file())
     {
         return Err(anyhow::anyhow!(
             "SBI binary file is not valid: {}",
-            static_cfg.sbi_binary
+            static_cfg.machine_binary
         ));
     }
     if static_cfg.kernel_binary != ""
@@ -133,7 +134,7 @@ fn main() -> Result<()> {
         (first_packet, runtime_cfg)
     };
 
-    if static_cfg.header_only {
+    if args.header_only.unwrap_or(false) {
         println!("Printing header configuration: {:?}", runtime_cfg);
         println!("Printing first packet: {:?}", first_packet);
         println!(
@@ -155,41 +156,28 @@ fn main() -> Result<()> {
 
     if let Some(path) = &args.dump_symbol_index {
         let mut f = std::fs::File::create(path)?;
-        for (asid, symbol_map) in symbol_index.get_user_symbol_map().iter() {
+        for symbol_map in symbol_index.get_user_symbol_map().iter() {
             for (addr, symbol) in symbol_map.iter() {
-                writeln!(f, "{} 0x{:x} {}", symbol.name, addr, asid).unwrap();
+                writeln!(f, "{} 0x{:x}", symbol.name, addr).unwrap();
             }
         }
         for (addr, symbol) in symbol_index.get_kernel_symbol_map().iter() {
-            writeln!(f, "{} 0x{:x} {}", symbol.name, addr, 0).unwrap();
+            writeln!(f, "{} 0x{:x}", symbol.name, addr).unwrap();
         }
         for (addr, symbol) in symbol_index.get_machine_symbol_map().iter() {
-            writeln!(f, "{} 0x{:x} {}", symbol.name, addr, 0).unwrap();
+            writeln!(f, "{} 0x{:x}", symbol.name, addr).unwrap();
         }
     }
 
     let mut bus: Bus<Entry> = Bus::new(BUS_SIZE);
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
 
-    let receiver_cfg = if let Some(path) = &args.config {
-        let f = File::open(path)?;
-        let reader = BufReader::new(f);
-        let value: serde_json::Value = serde_json::from_reader(reader)?;
-        value
-            .get("receivers")
-            .cloned()
-            .unwrap_or_else(|| serde_json::Value::Null)
-    } else {
-        serde_json::Value::Null
-    };
+    let receiver_cfg = static_cfg.receivers.clone();
 
-    if !receiver_cfg.is_null() {
-        let shared = receivers::abstract_receiver::Shared::new(&static_cfg, &runtime_cfg)?;
+    if !receiver_cfg.is_empty() {
+        let shared = receivers::abstract_receiver::Shared::new(&static_cfg.clone(), &runtime_cfg.clone())?;
 
-        let receiver_map = receiver_cfg.as_object().ok_or_else(|| {
-            anyhow::anyhow!("receivers config must be an object map of name -> config")
-        })?;
-        for (name, cfg) in receiver_map {
+        for (name, cfg) in receiver_cfg.iter() {
             let enabled = cfg
                 .get("enabled")
                 .and_then(|value| value.as_bool())

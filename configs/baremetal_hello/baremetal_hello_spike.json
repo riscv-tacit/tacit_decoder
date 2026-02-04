@@ -1,7 +1,7 @@
 {
   "encoded_trace": "../baremetal-ide/build/tmp/tacit.out",
-  "application_binary_asid_tuples": [],
-  "sbi_binary": "../baremetal-ide/build/examples/pmu-tests/trace-hello.elf",
+  "user_binaries": [],
+  "machine_binary": "../baremetal-ide/build/examples/pmu-tests/trace-hello.elf",
   "kernel_binary": "",
   "kernel_jump_label_patch_log": "",
   "driver_binary_entry_tuples": [],

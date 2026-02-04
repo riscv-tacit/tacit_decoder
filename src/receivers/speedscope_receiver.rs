@@ -21,19 +21,23 @@ struct ProfileEvent {
 }
 
 struct Lookup {
-    u_lookup: HashMap<u64, HashMap<u64, u32>>,
+    asid_to_binary_id_map: HashMap<u64, usize>,
+    u_lookup: Vec<HashMap<u64, u32>>,
     k_lookup: HashMap<u64, u32>,
     m_lookup: HashMap<u64, u32>,
+    asid_lookup: HashMap<u64, u32>,
 }
 
 impl Lookup {
     fn lookup(&self, prv: Prv, ctx: u64, addr: u64) -> Option<u32> {
         match prv {
-            Prv::PrvUser => self
-                .u_lookup
-                .get(&ctx)
-                .and_then(|lookup| lookup.get(&addr))
-                .copied(),
+            Prv::PrvUser => {
+                if let Some(binary_id) = self.asid_to_binary_id_map.get(&ctx) {
+                    self.u_lookup[*binary_id].get(&addr).copied()
+                } else {
+                    None
+                }
+            }
             Prv::PrvSupervisor => self.k_lookup.get(&addr).copied(),
             Prv::PrvMachine => self.m_lookup.get(&addr).copied(),
             _ => panic!("Unsupported privilege level: {:?}", prv),
@@ -50,6 +54,7 @@ pub struct SpeedscopeReceiver {
     end: u64,
     events: Vec<ProfileEvent>,
     unwinder: StackUnwinder,
+    curr_ctx: u64,
 }
 
 impl SpeedscopeReceiver {
@@ -78,6 +83,7 @@ impl SpeedscopeReceiver {
             end: 0,
             events: Vec::new(),
             unwinder,
+            curr_ctx: 0,
         }
     }
 }
@@ -123,9 +129,25 @@ impl SpeedscopeReceiver {
     fn lookup_frame(&self, frame: &Frame) -> Option<u32> {
         let id = self
             .frame_lookup
-            .lookup(frame.symbol.prv, frame.symbol.ctx, frame.addr);
+            .lookup(frame.prv, frame.ctx, frame.addr);
         id
     }
+
+    fn update_asid_frame(&mut self, ts: u64, ctx: u64) {
+        if ctx == self.curr_ctx {
+            return;
+        }
+        if self.curr_ctx != 0 {
+            if let Some(id) = self.frame_lookup.asid_lookup.get(&self.curr_ctx) {
+                self.events.push(ProfileEvent { kind: "C".into(), frame: *id, at: ts });
+            }
+        }
+        if let Some(id) = self.frame_lookup.asid_lookup.get(&ctx) {
+            self.events.push(ProfileEvent { kind: "O".into(), frame: *id, at: ts });
+        }
+        self.curr_ctx = ctx;
+    }
+    
 }
 
 impl AbstractReceiver for SpeedscopeReceiver {
@@ -141,25 +163,38 @@ impl AbstractReceiver for SpeedscopeReceiver {
         match entry {
             Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
-                match &kind {
-                    EventKind::SyncStart {
-                        start_prv: _,
-                        start_pc: _,
-                        ..
-                    } => {
-                        self.start = timestamp;
-                    }
-                    EventKind::SyncEnd { .. } => {
-                        self.end = timestamp;
-                    }
-                    _ => {}
-                }
-
                 if let Some(update) = self.unwinder.step(&Entry::Event {
                     timestamp,
                     kind: kind.clone(),
                 }) {
                     self.record_stack_update(timestamp, update);
+                }
+
+                match &kind {
+                    EventKind::SyncStart {
+                        start_prv: _,
+                        start_pc: _,
+                        start_ctx,
+                        ..
+                    } => {
+                        self.start = timestamp;
+                        self.update_asid_frame(timestamp, *start_ctx);
+                        self.curr_ctx = *start_ctx;
+                    }
+                    EventKind::SyncEnd { .. } => {
+                        self.end = timestamp;
+                    }
+                    EventKind::Trap {
+                        reason: _,
+                        prv_arc,
+                        arc: _,
+                        ctx,
+                    } => {
+                        if prv_arc.1 == Prv::PrvUser {
+                            self.update_asid_frame(timestamp, ctx.unwrap());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -185,6 +220,10 @@ impl AbstractReceiver for SpeedscopeReceiver {
             }
         }
 
+        if let Some(id) = self.frame_lookup.asid_lookup.get(&self.curr_ctx) {
+            self.events.push(ProfileEvent { kind: "C".into(), frame: *id, at: self.end });
+        }
+
         write_speedscope(
             &mut self.writer,
             &self.frames,
@@ -201,7 +240,10 @@ impl AbstractReceiver for SpeedscopeReceiver {
 /// Build Speedscope frames and an address→frame-id lookup.
 fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
     let mut frames = Vec::new();
-    let mut u_lookups: HashMap<u64, HashMap<u64, u32>> = HashMap::new();
+
+    // Build a asid to binary id map
+    let asid_to_binary_id_map = symbols.get_asid_to_binary_id_map().clone();
+    let mut u_lookups: Vec<HashMap<u64, u32>> = Vec::new();
     let mut k_lookup: HashMap<u64, u32> = HashMap::new();
     let mut m_lookup: HashMap<u64, u32> = HashMap::new();
 
@@ -225,24 +267,38 @@ fn build_frames(symbols: &SymbolIndex) -> (Vec<Value>, Lookup) {
         m_lookup.insert(addr, id);
     }
     // iterate over the user space symbol map
-    for (&asid, user_symbol_map) in symbols.get_user_symbol_map().iter() {
+    for user_symbol_map in symbols.get_user_symbol_map().iter() {
         let mut u_lookup: HashMap<u64, u32> = HashMap::new();
         for (&addr, info) in user_symbol_map.iter() {
             let id = frames.len() as u32;
             frames.push(json!({
-                "name": format!("{}:{}", asid, info.name),
+                "name": format!("{}", info.name),
                 "file": info.src.file,
                 "line": info.src.lines,
             }));
             u_lookup.insert(addr, id);
         }
-        u_lookups.insert(asid, u_lookup);
+        u_lookups.push(u_lookup);
+    }
+
+    // build a fake asid frame for each user asid
+    let mut asid_lookup = HashMap::new();
+    for asid in asid_to_binary_id_map.keys() {
+        let id = frames.len() as u32;
+        frames.push(json!({
+            "name": format!("u_{}", asid),
+            "file": "unknown",
+            "line": 0,
+        }));
+        asid_lookup.insert(*asid, id);
     }
 
     let lookup = Lookup {
+        asid_to_binary_id_map,
         u_lookup: u_lookups,
         k_lookup: k_lookup,
         m_lookup: m_lookup,
+        asid_lookup: asid_lookup,
     };
 
     (frames, lookup)
