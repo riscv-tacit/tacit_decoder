@@ -19,3 +19,9 @@ pub mod tnt_cyc_nret_emulator;
 pub mod tnt_cyc_retcompressed_emulator;
 #[path = "tc_emulator.rs"]
 pub mod tc_emulator;
+
+#[path = "oracle_bb_analyzer.rs"]
+pub mod oracle_bb_analyzer;
+
+#[path = "oracle_func_analyzer.rs"]
+pub mod oracle_func_analyzer;

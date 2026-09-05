@@ -5,6 +5,8 @@ use crate::receivers::emulation::bb_analyzer::BBAnalyzer;
 use crate::receivers::emulation::emulation_receivers::EmulationReceiver;
 use crate::receivers::emulation::func_analyzer::FuncAnalyzer;
 use crate::receivers::emulation::inclusive_func_analyzer::InclusiveFuncAnalyzer;
+use crate::receivers::emulation::oracle_bb_analyzer::OracleBBAnalyzer;
+use crate::receivers::emulation::oracle_func_analyzer::OracleFuncAnalyzer;
 use crate::receivers::emulation::tc_emulator::TCEmulator;
 use crate::receivers::emulation::tnt_cyc_nret_emulator::TNTCycNRETEmulator;
 use crate::receivers::emulation::tnt_cyc_retcompressed_emulator::TNTCycRETCompressedEmulator;
@@ -71,7 +73,8 @@ fn enabled(cfg: &serde_json::Value) -> bool {
 ///   "lim_tnt": 47,                         // tnt formats; default 6
 ///   "interval": 1000,                      // tc format; default 1000000
 ///   "error": {                             // optional pair-consumers
-///     "bb": {"path": "..."},
+///     "bb": {"path": "..."},            // vs TACIT timestamps
+///     "oracle_bb": {"path": "bboracle_boundary.csv.zst", "asids": [125]},
 ///     "func": {"path": "..."},
 ///     "inclusive_func": {"path": "..."}
 ///   },
@@ -121,6 +124,14 @@ pub fn build_emulation_pipeline(
                     analyzer_name,
                     path,
                     dump_csv,
+                    Arc::clone(&shared.symbol_index),
+                )),
+                // scored against the oracle rather than TACIT, so it takes the
+                // whole cfg (path/asids/limit) instead of the path+dump pair
+                "oracle_bb" => Box::new(OracleBBAnalyzer::new(analyzer_name, cfg)),
+                "oracle_func" => Box::new(OracleFuncAnalyzer::new(
+                    analyzer_name,
+                    cfg,
                     Arc::clone(&shared.symbol_index),
                 )),
                 other => bail!("emulation '{}': unknown error analyzer '{}'", name, other),

@@ -60,3 +60,18 @@ pub mod bb_pair_stats_receiver;
 
 #[path = "analysis/dispatch_stats_receiver.rs"]
 pub mod dispatch_stats_receiver;
+
+#[path = "analysis/oracle_match.rs"]
+pub mod oracle_match;
+
+#[path = "analysis/oracle_epsilon.rs"]
+pub mod oracle_epsilon;
+
+#[path = "analysis/oracle_func.rs"]
+pub mod oracle_func;
+
+#[path = "analysis/oracle_func_receiver.rs"]
+pub mod oracle_func_receiver;
+
+#[path = "analysis/oracle_bb_receiver.rs"]
+pub mod oracle_bb_receiver;

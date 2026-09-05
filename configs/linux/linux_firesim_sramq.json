@@ -1,0 +1,45 @@
+{
+  "encoded_trace": "/home/ubuntu/work/f2-chipyard/sims/firesim/deploy/results-workload/2026-09-02--03-36-04-trace-hello/trace-hello-trace-hello/tacit0.stripped.out",
+  "user_binaries": [
+    {
+      "binary": "/home/ubuntu/work/f2-chipyard/software/firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/hello",
+      "asids": [
+        116
+      ]
+    },
+    {
+      "binary": "/home/ubuntu/work/f2-chipyard/software/firemarshal/example-workloads/trace-hello/overlay/root/trace-hello/trace-submit",
+      "asids": [
+        114,
+        115
+      ]
+    }
+  ],
+  "machine_binary": "/home/ubuntu/work/f2-chipyard/software/firemarshal/images/firechip/trace-hello-trace-hello/trace-hello-trace-hello-bin",
+  "kernel_binary": "/home/ubuntu/work/f2-chipyard/software/firemarshal/images/firechip/trace-hello-trace-hello/trace-hello-trace-hello-bin-dwarf",
+  "kernel_jump_label_patch_log": "/home/ubuntu/work/f2-chipyard/sims/firesim/deploy/results-workload/2026-09-02--03-36-04-trace-hello/trace-hello-run-chores/jump_label_patch_map.txt",
+  "driver_binary_entry_tuples": [
+    [
+      "/home/ubuntu/work/f2-chipyard/software/firemarshal/images/firechip/trace-hello-trace-hello/tacit-dwarf",
+      "0xffffffff01aa7000"
+    ],
+    [
+      "/home/ubuntu/work/f2-chipyard/software/firemarshal/images/firechip/trace-hello-trace-hello/iceblk-dwarf",
+      "0xffffffff01b08000"
+    ],
+    [
+      "/home/ubuntu/work/f2-chipyard/software/firemarshal/images/firechip/trace-hello-trace-hello/icenet-dwarf",
+      "0xffffffff01a8e000"
+    ]
+  ],
+  "receivers": {
+    "txt": {
+      "enabled": true,
+      "path": "/home/ubuntu/work/f2-chipyard/sims/firesim/deploy/results-workload/2026-09-02--03-36-04-trace-hello/trace.stripped.txt"
+    },
+    "speedscope": {
+      "enabled": false,
+      "path": "/home/ubuntu/work/f2-chipyard/sims/firesim/deploy/results-workload/2026-09-02--03-17-03-trace-hello/trace.speedscope.json"
+    }
+  }
+}
