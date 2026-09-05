@@ -57,8 +57,15 @@ def iter_events(path):
 
 
 def iter_instances(path, user_asids, stats):
-    """Yield (bb_pc, cycles, exit_tsc); stats['dropped'] counts filtered
-    foreign-asid user rows. Rejects pre-exit_tsc captures."""
+    """Yield (bb_pc, cycles, exit_tsc, ref_delta); stats['dropped'] counts
+    filtered foreign-asid user rows. Rejects pre-exit_tsc captures.
+
+    ref_delta is exit_tsc minus the exit_tsc of this row's immediate
+    predecessor in the RAW csv -- tracked before filtering, so neither asid
+    drops nor downstream resync skips can stretch it across a gap. It is
+    exactly what TACIT would report if its transport were lossless, and so
+    serves as the paired reference floor."""
+    prev_raw_exit = None
     with _open(path) as f:
         header = f.readline().strip()
         if header != BB_HEADER:
@@ -68,13 +75,17 @@ def iter_instances(path, user_asids, stats):
             p = line.split(",")
             if len(p) != 10:
                 continue
+            ex = int(p[1])
             if user_asids is not None and p[3] == "0" \
                     and int(p[4]) not in user_asids:
                 stats["dropped"] += 1
+                prev_raw_exit = ex
                 continue
             yield (p[2],
                    (int(p[6]) + int(p[7]) + int(p[8]) + int(p[9])) / 12.0,
-                   int(p[1]))
+                   ex,
+                   None if prev_raw_exit is None else ex - prev_raw_exit)
+            prev_raw_exit = ex
 
 
 class Window:
@@ -141,7 +152,7 @@ def proxy_epsilon(path):
     cq = cs = pairs = 0
     stats = {"dropped": 0}
     prev_exit = None
-    for bb, t, ex in iter_instances(path, None, stats):
+    for bb, t, ex, _rd in iter_instances(path, None, stats):
         if prev_exit is not None:
             that = ex - prev_exit
             d = abs(t - that)
@@ -194,6 +205,12 @@ def main():
     num = den = num_q = num_s = 0.0
     cq = cs = matched = 0
     resyncs = skip_i = skip_k = 0
+    # paired reference floor: same matched instances, same den, but that_ref
+    # is the oracle's own exit-to-exit delta -- what a lossless TACIT would
+    # emit. num - num_ref is therefore TACIT's own error, free of the
+    # attribution-convention gap that both estimators share.
+    num_ref = 0.0
+    cs_ref = ref_pairs = 0
 
     ibuf, ebuf = I.buf, E.buf
     while I.fill(1) and E.fill(2) >= 1:
@@ -213,6 +230,15 @@ def main():
                 elif d > 0:
                     num_q += d
                     cq += 1
+                rd = ibuf[0][3]
+                if rd is not None:
+                    dr = t - rd
+                    if dr < 0:
+                        dr = -dr
+                    num_ref += dr
+                    ref_pairs += 1
+                    if dr >= 1.0:
+                        cs_ref += 1
             ibuf.popleft()
             ebuf.popleft()
             continue
@@ -262,6 +288,12 @@ def main():
     print(f"epsilon(BB) = {100 * num / den:.2f}%   (sum|d| {num:.0f} / sum t {den:.0f})")
     print(f"  quantization (|d|<1): {100 * num_q / den:.2f}%  ({cq} instances)")
     print(f"  semantic (|d|>=1):    {100 * num_s / den:.2f}%  ({cs} instances)")
+    if ref_pairs:
+        eps_ref = 100 * num_ref / den
+        print(f"reference floor      = {eps_ref:.2f}%   "
+              f"(same {ref_pairs} matched instances, oracle exit deltas; "
+              f"{cs_ref} with |d|>=1)")
+        print(f"  attributable to TACIT: {100 * num / den - eps_ref:+.2f} pp")
 
 
 if __name__ == "__main__":
