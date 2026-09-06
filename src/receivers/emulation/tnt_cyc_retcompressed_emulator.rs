@@ -7,8 +7,12 @@ use std::sync::Arc;
 
 const STACK_DEPTH: usize = 64;
 
-// Emulates a TNT based encoder, emitting CYC packets
-// It never compresses RET packets ever
+// Emulates a TNT based encoder, emitting CYC packets.
+// Unlike TNTCycNRETEmulator, this one DOES compress returns: a call pushes its
+// return address onto a STACK_DEPTH-deep stack, and an uninferable jump whose
+// target matches the top spends one TNT bit instead of a full address packet.
+// A mismatch (or an overflowed or unknowable stack) forces a flush, so returns
+// are only cheap while the stack tracks the program.
 pub struct TNTCycRETCompressedEmulator {
     event_staging: Vec<(u64, EventKind)>,
     lim_tnt: u64,
