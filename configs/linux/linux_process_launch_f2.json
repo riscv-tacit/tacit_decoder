@@ -1,0 +1,32 @@
+{
+  "encoded_trace": "trace/tacit0.out",
+  "user_binaries": [
+    {
+      "binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/trace-submit",
+      "asids": []
+    },
+    {
+      "binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy",
+      "asids": []
+    }
+  ],
+  "machine_binary": "../firemarshal/images/firechip/process-launch-f2-trace-256/process-launch-f2-trace-256-bin",
+  "kernel_binary": "../firemarshal/images/firechip/process-launch-f2-trace-256/process-launch-f2-trace-256-bin-dwarf",
+  "kernel_jump_label_patch_log": "provenance/jump_label_patch_map.txt",
+  "driver_binary_entry_tuples": [],
+  "receivers": {
+    "prv_breakdown": {
+      "enabled": true
+    },
+    "speedscope": {
+      "enabled": true,
+      "path": "trace.process-launch-f2.speedscope.json"
+    },
+    "iteration_breakdown": {
+      "enabled": true,
+      "marker_func": "syscall",
+      "tracked_func": "rcu_do_batch",
+      "path": "trace.process-launch-f2.iteration_breakdown.csv"
+    }
+  }
+}

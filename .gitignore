@@ -16,6 +16,7 @@ target-rust-analyzer/
 *.speedscope.json
 *.csv
 *.png
+*.pdf
 *.sqlite.db*
 
 # Trace bundles: multi-GB captures assembled by scripts/analysis/bundle_run.py.
