@@ -174,7 +174,6 @@ impl AbstractReceiver for SpeedscopeReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
                 // the gap frame must close before the unwinder reopens a function
                 // frame at Resume, so speedscope's open/close nesting stays valid

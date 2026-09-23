@@ -123,7 +123,6 @@ fn step_bb(
                 pc, prv, ctx, initial_pc
             )
         });
-        // bus.broadcast(Entry::instruction(insn, pc));
         num_instructions += 1;
         if stop_on_ij {
             if insn.is_cfc_insn() {
@@ -174,7 +173,6 @@ fn step_bb_until(
                 pc, prv, ctx, initial_pc, target_pc
             )
         });
-        // bus.broadcast(Entry::instruction(insn, pc));
         num_instructions += 1;
         if insn.is_branch() || insn.is_direct_jump() {
             break;

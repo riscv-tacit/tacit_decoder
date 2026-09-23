@@ -79,9 +79,6 @@ impl AbstractReceiver for PrvBreakdownReceiver {
             Entry::Event { timestamp, .. } => {
                 self.update_prv_cycles(timestamp);
             }
-            Entry::Instruction { .. } => {
-                // do nothing
-            }
         }
     }
 

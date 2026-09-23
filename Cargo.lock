@@ -1561,9 +1561,9 @@ dependencies = [
 
 [[package]]
 name = "rvdasm"
-version = "0.2.6"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d071300ec852f98938a0ea01f6790ef7df9b2a468cd6e18cc1acf7371025efe"
+checksum = "a0f495e8085a0d196ffbe4d4580b8e19c7d8ac452c0d063ba2363a1f16325551"
 dependencies = [
  "once_cell",
  "serde",

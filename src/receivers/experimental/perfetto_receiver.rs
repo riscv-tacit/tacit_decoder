@@ -124,7 +124,6 @@ impl AbstractReceiver for PerfettoReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
                 self.last_ts = timestamp;
                 self.maybe_record_sync_markers(timestamp, &kind);

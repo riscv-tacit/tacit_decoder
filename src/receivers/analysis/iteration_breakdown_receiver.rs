@@ -140,7 +140,6 @@ impl AbstractReceiver for IterationBreakdownReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { .. } => {}
             Entry::Event {
                 timestamp,
                 ref kind,

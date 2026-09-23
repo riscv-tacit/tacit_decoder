@@ -1,12 +1,10 @@
 use crate::common::prv::Prv;
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
 use crate::frontend::trap_type::TrapType;
-use rvdasm::insn::Insn;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum Entry {
-    Instruction { insn: Insn, pc: u64 },
     Event { timestamp: u64, kind: EventKind },
 }
 
@@ -78,12 +76,6 @@ impl Entry {
         }
     }
 
-    pub fn instruction(insn: &Insn, pc: u64) -> Self {
-        Entry::Instruction {
-            insn: insn.clone(),
-            pc,
-        }
-    }
 }
 
 impl EventKind {

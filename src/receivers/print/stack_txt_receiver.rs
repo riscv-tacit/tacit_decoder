@@ -96,7 +96,6 @@ impl AbstractReceiver for StackTxtReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { insn: _, pc: _ } => {}
             Entry::Event { timestamp, kind } => {
                 // log the event
                 writeln!(self.writer, "[ts {timestamp}] {:?}", kind).unwrap();

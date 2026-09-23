@@ -49,15 +49,6 @@ impl AbstractReceiver for TxtReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { insn, pc } => {
-                self.writer
-                    .write_all(format!("{:#x}:", pc).as_bytes())
-                    .unwrap();
-                self.writer
-                    .write_all(format!(" {}", insn.to_string()).as_bytes())
-                    .unwrap();
-                self.writer.write_all(b"\n").unwrap();
-            }
             Entry::Event {
                 timestamp: _,
                 kind: EventKind::BPHit { hit_count },

@@ -144,7 +144,6 @@ impl AbstractReceiver for PerfectSamplerReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match &entry {
-            Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
                 let t = *timestamp;
                 if let EventKind::SyncStart { .. } = kind {

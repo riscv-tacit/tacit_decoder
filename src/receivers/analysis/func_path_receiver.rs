@@ -234,7 +234,6 @@ impl AbstractReceiver for FuncPathReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
                 // A gap makes the current invocation / post-exit window
                 // unobservable: drop the invocation (it would get a bogus

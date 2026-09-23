@@ -129,7 +129,6 @@ impl AbstractReceiver for PathProfileReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
                 match kind {
                     EventKind::TakenBranch { .. } => {

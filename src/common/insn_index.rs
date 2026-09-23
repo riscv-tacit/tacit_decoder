@@ -52,16 +52,36 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         panic!("Unsupported architecture: {:?}", m_elf_arch);
     };
     let dasm = Disassembler::new(xlen);
-    let mut m_insn_map = FxHashMap::default();
+    let mut m_insn_map: FxHashMap<u64, Insn> = FxHashMap::default();
     for section in m_elf.sections() {
         if let object::SectionFlags::Elf { sh_flags } = section.flags() {
             if sh_flags & (SHF_EXECINSTR as u64) != 0 {
+                let name = section.name().unwrap_or("<unnamed>");
+                // OpenSBI's fw_payload carries the whole kernel image as one
+                // executable `.payload` section: 27 MB here, of which ~10 MB is
+                // text and the rest is data disassembled as junk. When a kernel
+                // ELF is given, the kernel runs in S-mode against that ELF's map
+                // and nothing executes the payload in M-mode, so indexing it only
+                // adds ~7M entries (~70% of the index) that are never looked up.
+                // Without a kernel ELF (bare-metal payloads) it IS the program.
+                if name == ".payload" && cfg.kernel_binary != "" {
+                    debug!(
+                        "machine-space: skipping `{}` @ {:#x} ({} bytes): kernel payload, indexed from the kernel ELF",
+                        name,
+                        section.address(),
+                        section.size()
+                    );
+                    continue;
+                }
                 let addr = section.address();
                 let data = section.data()?;
-                m_insn_map.extend(dasm.disassemble_all(&data, addr));
+                m_insn_map.reserve(data.len() / 2);
+                dasm.disassemble_each(&data, addr, |a, insn| {
+                    m_insn_map.insert(a, insn);
+                });
                 debug!(
                     "machine-space instruction section `{}` @ {:#x}: {} insns",
-                    section.name().unwrap_or("<unnamed>"),
+                    name,
                     addr,
                     m_insn_map.len()
                 );
@@ -104,7 +124,11 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
                 if sh_flags & (SHF_EXECINSTR as u64) != 0 {
                     let addr = section.address();
                     let data = section.data()?;
-                    let sec_map = dasm.disassemble_all(&data, addr);
+                    let mut sec_map: FxHashMap<u64, Insn> = FxHashMap::default();
+                    sec_map.reserve(data.len() / 2);
+                    dasm.disassemble_each(&data, addr, |a, insn| {
+                        sec_map.insert(a, insn);
+                    });
                     debug!(
                         "user application section `{}` @ {:#x}: {} insns",
                         section.name().unwrap_or("<unnamed>"),
@@ -141,7 +165,11 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
                 if sh_flags & (SHF_EXECINSTR as u64) != 0 {
                     let addr = section.address();
                     let data = section.data()?;
-                    let sec_map = dasm.disassemble_all(&data, addr);
+                    let mut sec_map: FxHashMap<u64, Insn> = FxHashMap::default();
+                    sec_map.reserve(data.len() / 2);
+                    dasm.disassemble_each(&data, addr, |a, insn| {
+                        sec_map.insert(a, insn);
+                    });
                     debug!(
                         "kernel binary section `{}` @ {:#x}: {} insns",
                         section.name().unwrap_or("<unnamed>"),

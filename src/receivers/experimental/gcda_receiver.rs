@@ -133,9 +133,6 @@ impl AbstractReceiver for GcdaReceiver {
             } => {
                 self.update_edge_map(arc.0, arc.1);
             }
-            Entry::Instruction { insn: _, pc } => {
-                self.update_func_symbol_map(pc);
-            }
             _ => {}
         }
     }

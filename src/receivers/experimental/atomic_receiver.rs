@@ -42,11 +42,6 @@ pub fn factory(
 crate::register_receiver!("atomic", factory);
 
 impl AtomicReceiver {
-    fn is_atomic_insn(insn: &rvdasm::insn::Insn) -> bool {
-        let name = insn.get_name();
-        name.starts_with("lr.") || name.starts_with("sc.") || name.starts_with("amo")
-    }
-
     fn drain_update(&mut self, update: StackUpdateResult) {
         let _ = update;
     }
@@ -80,19 +75,6 @@ impl AbstractReceiver for AtomicReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
-            Entry::Instruction { insn, pc } => {
-                if Self::is_atomic_insn(&insn) {
-                    writeln!(
-                        self.writer,
-                        "[{:>10}] 0x{:08x}: {}",
-                        self.last_ts,
-                        pc,
-                        insn.to_string()
-                    )
-                    .unwrap();
-                    self.write_stack_snapshot();
-                }
-            }
             Entry::Event { timestamp, kind } => {
                 self.last_ts = timestamp;
                 if let Some(update) = self.unwinder.step(&Entry::Event {
