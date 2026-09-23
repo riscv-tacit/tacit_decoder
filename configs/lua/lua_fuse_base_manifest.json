@@ -1,0 +1,63 @@
+{
+ "tag": "base",
+ "label": "base",
+ "results": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-28--21-49-12-lua-fuse-base",
+ "jobs": {
+  "fannkuch": {
+   "config": "configs/lua/lua_fuse_base_fannkuch.json",
+   "window_s": 0.007,
+   "child_exit": 1,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "./lua: cannot open bench/fannkuch.lua: No such file or directory",
+    "stack traceback:",
+    "        [C]: in function 'dofile'",
+    "        bench/fannkuch_rep.lua:6: in main chunk",
+    "        [C]: in ?"
+   ],
+   "trace_bytes": 1398464
+  },
+  "mandelbrot": {
+   "config": "configs/lua/lua_fuse_base_mandelbrot.json",
+   "window_s": 6.543,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "inset 321907 checksum 232664538"
+   ],
+   "trace_bytes": 2707479424
+  },
+  "sieve": {
+   "config": "configs/lua/lua_fuse_base_sieve.json",
+   "window_s": 4.674,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "primes below 15000000: 970704"
+   ],
+   "trace_bytes": 1914057984
+  },
+  "spectralnorm": {
+   "config": "configs/lua/lua_fuse_base_spectralnorm.json",
+   "window_s": 7.09,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "1.274224131"
+   ],
+   "trace_bytes": 2577811904
+  }
+ }
+}

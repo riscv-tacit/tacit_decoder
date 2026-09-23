@@ -1,18 +1,14 @@
 use crate::backend::event::{Entry, EventKind};
 use crate::common::insn_index::InstructionIndex;
 use crate::common::prv::Prv;
-use crate::receivers::emulation::abstract_emulator::{AbstractEmulatedAnalyzer, AbstractEmulator, EmulationResult};
+use crate::receivers::emulation::abstract_emulator::{share, AbstractEmulatedAnalyzer, AbstractEmulator, EmulationResult};
 use circular_buffer::CircularBuffer;
 use std::sync::Arc;
 
 const STACK_DEPTH: usize = 64;
 
-// Emulates a TNT based encoder, emitting CYC packets.
-// Unlike TNTCycNRETEmulator, this one DOES compress returns: a call pushes its
-// return address onto a STACK_DEPTH-deep stack, and an uninferable jump whose
-// target matches the top spends one TNT bit instead of a full address packet.
-// A mismatch (or an overflowed or unknowable stack) forces a flush, so returns
-// are only cheap while the stack tracks the program.
+// Emulates a TNT based encoder, emitting CYC packets
+// It never compresses RET packets ever
 pub struct TNTCycRETCompressedEmulator {
     event_staging: Vec<(u64, EventKind)>,
     lim_tnt: u64,
@@ -137,18 +133,11 @@ impl AbstractEmulator for TNTCycRETCompressedEmulator {
                     let num_events = self.event_staging.len() as u64;
 
                     if num_events > 0 {
-                        // Spread `slack` evenly: event i lands at
-                        // floor(i*slack/n) from the batch start, so no event is
-                        // more than one cycle off its ideal share and the batch
-                        // still advances by exactly `slack`. Handing the whole
-                        // remainder to the last event skews badly when slack is
-                        // small relative to n -- 15 cycles over 8 events becomes
-                        // [1,1,1,1,1,1,1,8] instead of [1,2,2,2,2,2,2,2].
-                        let base = self.emu_clock;
-                        let staged: Vec<(u64, EventKind)> =
-                            self.event_staging.drain(..).collect();
-                        for (i, (event_timestamp, event)) in staged.into_iter().enumerate() {
-                            self.emu_clock = base + ((i as u64 + 1) * slack) / num_events;
+                        // cumulative rounding: shares sum to `slack`, none is more than one
+                        // cycle from the even split (see `share`)
+                        let staged = std::mem::take(&mut self.event_staging);
+                        for (j, (event_timestamp, event)) in staged.into_iter().enumerate() {
+                            self.emu_clock += share(slack, num_events, j as u64);
                             self.analyzer.push_emulated_event(EmulationResult {
                                 ref_ts: event_timestamp,
                                 emu_ts: self.emu_clock,

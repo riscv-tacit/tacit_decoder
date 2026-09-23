@@ -1,0 +1,36 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-28--21-49-12-lua-fuse-base/lua-fuse-base-base-mandelbrot-traced/tacit0.out",
+ "user_binaries": [
+  {
+   "binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/example-workloads/lua-fuse-base/overlay/root/lua-dispatch/lua",
+   "asids": [
+    115
+   ]
+  },
+  {
+   "binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/example-workloads/lua-fuse-base/overlay/root/lua-dispatch/trace-run",
+   "asids": [
+    114
+   ]
+  }
+ ],
+ "machine_binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-mandelbrot-traced/lua-fuse-base-base-mandelbrot-traced-bin",
+ "kernel_binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-mandelbrot-traced/lua-fuse-base-base-mandelbrot-traced-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-28--21-49-12-lua-fuse-base/lua-fuse-base-base-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/boards/firechip/drivers/tacit-driver/tacit.o",
+   "0xffffffff01aa7000"
+  ],
+  [
+   "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
+   "0xffffffff01b08000"
+  ]
+ ],
+ "receivers": {
+  "txt": {
+   "enabled": true,
+   "path": "/scratch/iansseijelly/tacit-chipyard/software/tacit_decoder/trace.mandelbrot.events.txt"
+  }
+ }
+}

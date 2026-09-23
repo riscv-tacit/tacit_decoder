@@ -1,0 +1,139 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-09-01--22-10-48-lua-fuse-base/lua-fuse-base-base-sieve-traced/tacit0.out",
+ "user_binaries": [
+  {
+   "binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/example-workloads/lua-fuse-base/overlay/root/lua-dispatch/lua",
+   "asids": [
+    115
+   ]
+  },
+  {
+   "binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/example-workloads/lua-fuse-base/overlay/root/lua-dispatch/trace-run",
+   "asids": [
+    114
+   ]
+  }
+ ],
+ "machine_binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-sieve-traced/lua-fuse-base-base-sieve-traced-bin",
+ "kernel_binary": "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-sieve-traced/lua-fuse-base-base-sieve-traced-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-09-01--22-10-48-lua-fuse-base/lua-fuse-base-base-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-sieve-traced/tacit-dwarf",
+   "0xffffffff01aa7000"
+  ],
+  [
+   "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-sieve-traced/iceblk-dwarf",
+   "0xffffffff01b08000"
+  ],
+  [
+   "/scratch/iansseijelly/tacit-chipyard/software/firemarshal/images/firechip/lua-fuse-base-base-sieve-traced/icenet-dwarf",
+   "0xffffffff01a8e000"
+  ]
+ ],
+ "receivers": {
+  "prv_breakdown": {
+   "enabled": true
+  },
+  "bb_stats": {
+   "enabled": true,
+   "path": "output_lua_scratch/trace.lua-fuse-sep01-sieve.bb_stats.csv"
+  },
+  "bb_pair_stats": {
+   "enabled": true,
+   "path": "output_lua_scratch/trace.lua-fuse-sep01-sieve.bb_pair_stats.csv"
+  },
+  "dispatch_stats": {
+   "enabled": true,
+   "path": "output_lua_scratch/trace.lua-fuse-sep01-sieve.dispatch_stats.csv",
+   "handlers": [
+    "0x1ffc6",
+    "0x1fff4",
+    "0x2003c",
+    "0x2007e",
+    "0x200c0",
+    "0x2011a",
+    "0x2017e",
+    "0x20246",
+    "0x202aa",
+    "0x20330",
+    "0x203b6",
+    "0x2042c",
+    "0x20490",
+    "0x204f4",
+    "0x20566",
+    "0x205ae",
+    "0x205d0",
+    "0x20634",
+    "0x20686",
+    "0x20722",
+    "0x2076a",
+    "0x207c4",
+    "0x2088c",
+    "0x20900",
+    "0x209a0",
+    "0x20a4c",
+    "0x20a90",
+    "0x20ae6",
+    "0x20b8c",
+    "0x20bfc",
+    "0x20c32",
+    "0x20cc2",
+    "0x20d1c",
+    "0x20d9e",
+    "0x20e66",
+    "0x20e92",
+    "0x20ecc",
+    "0x20f06",
+    "0x20f8a",
+    "0x21008",
+    "0x2106c",
+    "0x210ac",
+    "0x210e2",
+    "0x21180",
+    "0x21230",
+    "0x2125c",
+    "0x212be",
+    "0x2133c",
+    "0x213a0",
+    "0x213ba",
+    "0x21402",
+    "0x214c0",
+    "0x21560",
+    "0x21600",
+    "0x216a0",
+    "0x216e0",
+    "0x21754",
+    "0x217c2",
+    "0x21866",
+    "0x21908",
+    "0x219e2",
+    "0x21a26",
+    "0x21a64",
+    "0x21a90",
+    "0x21b26",
+    "0x21b96",
+    "0x21bd4",
+    "0x21c36",
+    "0x21cac",
+    "0x21d5c",
+    "0x21d8a",
+    "0x21dd2",
+    "0x21e3c",
+    "0x21ea0",
+    "0x21f0c",
+    "0x21f90",
+    "0x22026",
+    "0x220ce",
+    "0x22130",
+    "0x22170",
+    "0x221fc",
+    "0x22258",
+    "0x222cc"
+   ],
+   "seq_path": "output_lua_scratch/trace.lua-fuse-sep01-sieve.dispatch_seq.csv",
+   "seq_limit": 40000000,
+   "hist_path": "output_lua_scratch/trace.lua-fuse-sep01-sieve.dispatch_hist.csv"
+  }
+ }
+}

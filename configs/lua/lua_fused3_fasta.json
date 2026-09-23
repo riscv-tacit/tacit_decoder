@@ -1,0 +1,125 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-02--09-24-42-lua-microbench-fused/lua-microbench-fused-microF-fasta-traced/tacit0.out",
+ "user_binaries": [
+  {
+   "binary": "../firemarshal/example-workloads/lua-microbench-fused/overlay/root/lua-dispatch/lua",
+   "asids": [
+    107
+   ]
+  },
+  {
+   "binary": "../firemarshal/example-workloads/lua-microbench-fused/overlay/root/lua-dispatch/trace-run",
+   "asids": [
+    106
+   ]
+  }
+ ],
+ "machine_binary": "../firemarshal/images/firechip/lua-microbench-fused-microF-fasta-traced/lua-microbench-fused-microF-fasta-traced-bin",
+ "kernel_binary": "../firemarshal/images/firechip/lua-microbench-fused-microF-fasta-traced/lua-microbench-fused-microF-fasta-traced-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-02--09-24-42-lua-microbench-fused/lua-microbench-fused-microF-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "../firemarshal/boards/firechip/drivers/tacit-driver/tacit.o",
+   "0xffffffff01b08000"
+  ],
+  [
+   "../firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
+   "0xffffffff01aa7000"
+  ]
+ ],
+ "receivers": {
+  "bb_pair_stats": {
+   "enabled": true,
+   "path": "trace.lua-fused3-fasta.bb_pair_stats.csv"
+  },
+  "dispatch_stats": {
+   "enabled": true,
+   "path": "trace.lua-fused3-fasta.dispatch_stats.csv",
+   "handlers": [
+    "0x1ffa8",
+    "0x2001a",
+    "0x2005c",
+    "0x2008c",
+    "0x200d2",
+    "0x20110",
+    "0x2016a",
+    "0x201f6",
+    "0x20252",
+    "0x202b4",
+    "0x202f8",
+    "0x203aa",
+    "0x20486",
+    "0x204c6",
+    "0x20536",
+    "0x20586",
+    "0x20626",
+    "0x206a0",
+    "0x206f2",
+    "0x20762",
+    "0x207ae",
+    "0x207c6",
+    "0x20802",
+    "0x20856",
+    "0x208c6",
+    "0x20936",
+    "0x20998",
+    "0x209e8",
+    "0x20a3a",
+    "0x20a8e",
+    "0x20af0",
+    "0x20b52",
+    "0x20bae",
+    "0x20c30",
+    "0x20cb6",
+    "0x20d26",
+    "0x20d96",
+    "0x20df8",
+    "0x20e5a",
+    "0x20ebc",
+    "0x20f1e",
+    "0x20f7a",
+    "0x20fc0",
+    "0x21044",
+    "0x210d2",
+    "0x2112a",
+    "0x21158",
+    "0x2118e",
+    "0x211ce",
+    "0x21228",
+    "0x21270",
+    "0x212b6",
+    "0x21304",
+    "0x21374",
+    "0x213d8",
+    "0x2143c",
+    "0x214a0",
+    "0x214fe",
+    "0x2154a",
+    "0x21598",
+    "0x215f6",
+    "0x21646",
+    "0x21696",
+    "0x216e6",
+    "0x21740",
+    "0x217bc",
+    "0x21848",
+    "0x218b2",
+    "0x21954",
+    "0x219cc",
+    "0x21a3e",
+    "0x21a6a",
+    "0x21a94",
+    "0x21ad0",
+    "0x21b08",
+    "0x21b42",
+    "0x21b84",
+    "0x21bec",
+    "0x21c44",
+    "0x21c80",
+    "0x21caa",
+    "0x21d0e",
+    "0x225cc"
+   ]
+  }
+ }
+}

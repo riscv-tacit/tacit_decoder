@@ -1,3 +1,6 @@
+# SUPERSEDED for vbb work by plot_vbb_share.py, which reads the bb_stats receiver
+# CSV directly and ranks on vbb = n*(mean-p5). Kept for the SPEC sqlite flow
+# (trace_db_tools bb-stats --outdir), whose netvar ranking it still reproduces.
 from typing import List, Tuple
 
 import matplotlib.pyplot as plt

@@ -5,6 +5,8 @@ pub mod registry;
 #[path = "core/stack_unwinder.rs"]
 pub mod stack_unwinder;
 
+#[path = "analysis/latency_hist.rs"]
+pub mod latency_hist;
 #[path = "analysis/bb_stats_receiver.rs"]
 pub mod bb_stats_receiver;
 #[path = "analysis/path_profile_receiver.rs"]
@@ -75,3 +77,6 @@ pub mod oracle_func_receiver;
 
 #[path = "analysis/oracle_bb_receiver.rs"]
 pub mod oracle_bb_receiver;
+
+#[path = "analysis/bb_seq_receiver.rs"]
+pub mod bb_seq_receiver;

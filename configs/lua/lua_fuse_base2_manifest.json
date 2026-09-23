@@ -1,0 +1,64 @@
+{
+ "tag": "base",
+ "label": "base2",
+ "results": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-28--22-06-02-lua-fuse-base",
+ "jobs": {
+  "fannkuch": {
+   "config": "configs/lua/lua_fuse_base2_fannkuch.json",
+   "window_s": 4.341,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "8629",
+    "Pfannkuchen(9) = 30",
+    "8629",
+    "Pfannkuchen(9) = 30",
+    "8629",
+    "Pfannkuchen(9) = 30"
+   ],
+   "trace_bytes": 1638086464
+  },
+  "mandelbrot": {
+   "config": "configs/lua/lua_fuse_base2_mandelbrot.json",
+   "window_s": 6.544,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "inset 321907 checksum 232664538"
+   ],
+   "trace_bytes": 2707479360
+  },
+  "sieve": {
+   "config": "configs/lua/lua_fuse_base2_sieve.json",
+   "window_s": 4.673,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "primes below 15000000: 970704"
+   ],
+   "trace_bytes": 1914064000
+  },
+  "spectralnorm": {
+   "config": "configs/lua/lua_fuse_base2_spectralnorm.json",
+   "window_s": 7.085,
+   "child_exit": 0,
+   "asids": {
+    "lua": 115,
+    "trace-run": 114
+   },
+   "guest_output": [
+    "1.274224131"
+   ],
+   "trace_bytes": 2577822400
+  }
+ }
+}

@@ -82,6 +82,43 @@ def parse_run_asids(res, uartlog, app_basename):
     return sorted(set(asids))
 
 
+def disptab_handlers(elf_path):
+    """Handler entry addresses read out of the app ELF's own computed-goto table.
+
+    A bytecode interpreter's dispatch targets are build-specific: every rebuild moves all
+    of them. Recording them in a template guarantees they eventually disagree with the
+    binary sitting next to them, so derive them from the bundled ELF instead -- the same
+    reason asids and driver bases are parsed from the uartlog rather than written down.
+    Returns [] if this app has no such table (not an interpreter, or a stripped binary).
+    """
+    try:
+        from elftools.elf.elffile import ELFFile
+    except ImportError:
+        return []
+    import struct
+    with open(elf_path, "rb") as f:
+        elf = ELFFile(f)
+        sym = None
+        for sec in elf.iter_sections():
+            if sec.header["sh_type"] != "SHT_SYMTAB":
+                continue
+            for cand in sec.iter_symbols():
+                if re.fullmatch(r"disptab(\.\d+)?", cand.name):
+                    sym = cand
+        if sym is None:
+            return []
+        addr, size = sym["st_value"], sym["st_size"]
+        for seg in elf.iter_segments():
+            if seg["p_type"] != "PT_LOAD":
+                continue
+            lo, hi = seg["p_vaddr"], seg["p_vaddr"] + seg["p_filesz"]
+            if lo <= addr and addr + size <= hi:
+                raw = seg.data()[addr - lo: addr - lo + size]
+                ptrs = struct.unpack("<%dQ" % (size // 8), raw)
+                return [hex(p) for p in sorted(set(ptrs))]
+    return []
+
+
 def git_info(path):
     def run(*cmd):
         try:
@@ -247,12 +284,27 @@ def main():
         cfg.setdefault("user_binaries", [])
         cfg.setdefault("driver_binary_entry_tuples", [])
 
-    # receiver outputs land in out/
     for recv, rcfg in cfg.get("receivers", {}).items():
-        if isinstance(rcfg, dict) and "path" in rcfg:
-            rcfg = dict(rcfg)
-            rcfg["path"] = f"out/{Path(rcfg['path']).name}"
-            cfg["receivers"][recv] = rcfg
+        if not isinstance(rcfg, dict):
+            continue
+        # "handlers": "from-disptab" -> read the dispatch table out of a bundled app ELF,
+        # so the handler list cannot disagree with the binary shipped beside it
+        if rcfg.get("handlers") == "from-disptab":
+            found = []
+            for rel in apps:
+                found = disptab_handlers(out / rel)
+                if found:
+                    print(f"bundle_run: {recv}: {len(found)} handlers read from {rel}")
+                    break
+            if not found:
+                die(f"{recv} asked for handlers from disptab but no bundled app has one")
+            rcfg["handlers"] = found
+        # every output key, not just "path": a receiver that writes elsewhere (hist_path,
+        # seq_path) would otherwise scatter files outside the bundle
+        for key in ("path", "hist_path", "seq_path"):
+            if isinstance(rcfg.get(key), str) and rcfg[key]:
+                rcfg[key] = f"out/{Path(rcfg[key]).name}"
+        cfg["receivers"][recv] = rcfg
 
     (out / "config.json").write_text(json.dumps(cfg, indent=2) + "\n")
 

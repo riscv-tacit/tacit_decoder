@@ -1,0 +1,27 @@
+{
+  "encoded_trace": "",
+  "user_binaries": [
+    { "binary": "", "asids": [] },
+    { "binary": "", "asids": [] }
+  ],
+  "machine_binary": "",
+  "kernel_binary": "",
+  "kernel_jump_label_patch_log": "required",
+  "driver_binary_entry_tuples": [],
+  "receivers": {
+    "prv_breakdown": { "enabled": true },
+    "bb_stats": {
+      "enabled": true,
+      "path": "lua.bb_stats.csv",
+      "hist_path": "lua.bb_hist.csv",
+      "hist_top": 16
+    },
+    "dispatch_stats": {
+      "enabled": true,
+      "path": "lua.dispatch_stats.csv",
+      "hist_path": "lua.dispatch_hist.csv",
+      "handlers": "from-disptab"
+    }
+  },
+  "emulations": []
+}

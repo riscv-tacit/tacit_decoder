@@ -1,0 +1,36 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-02--04-10-28-lua-dispatch-fused2/lua-dispatch-fused2-fused2-fannkuch-traced/tacit0.out",
+ "user_binaries": [
+  {
+   "binary": "../firemarshal/example-workloads/lua-dispatch-fused2/overlay/root/lua-dispatch/lua",
+   "asids": [
+    107
+   ]
+  },
+  {
+   "binary": "../firemarshal/example-workloads/lua-dispatch-fused2/overlay/root/lua-dispatch/trace-run",
+   "asids": [
+    106
+   ]
+  }
+ ],
+ "machine_binary": "../firemarshal/images/firechip/lua-dispatch-fused2-fused2-fannkuch-traced/lua-dispatch-fused2-fused2-fannkuch-traced-bin",
+ "kernel_binary": "../firemarshal/images/firechip/lua-dispatch-fused2-fused2-fannkuch-traced/lua-dispatch-fused2-fused2-fannkuch-traced-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-02--04-10-28-lua-dispatch-fused2/lua-dispatch-fused2-fused2-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "../firemarshal/boards/firechip/drivers/tacit-driver/tacit.o",
+   "0xffffffff01b08000"
+  ],
+  [
+   "../firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
+   "0xffffffff01b88000"
+  ]
+ ],
+ "receivers": {
+  "bb_pair_stats": {
+   "enabled": true,
+   "path": "trace.lua-fused2-fannkuch.bb_pair_stats.csv"
+  }
+ }
+}
