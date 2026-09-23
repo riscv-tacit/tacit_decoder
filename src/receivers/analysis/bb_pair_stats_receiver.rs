@@ -1,6 +1,7 @@
 use crate::backend::event::{Entry, EventKind};
 use crate::common::prv::Prv;
 use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
+use crate::receivers::latency_hist::LatencyHist;
 
 use bus::BusReader;
 use std::collections::HashMap;
@@ -18,11 +19,16 @@ pub struct BB {
    pair (previous BB, current BB); the recorded interval is the current BB's
    execution time, defined exactly as in bb_stats. Pairs never span a trap or
    a sync: discontinuities reset the predecessor, so the first BB after a
-   trap/sync contributes no pair. */
+   trap/sync contributes no pair.
+
+   Intervals are kept as a LatencyHist per pair, like bb_stats and dispatch_stats,
+   not as a Vec of every sample: on a 300M-dispatch capture the Vec form held
+   1.8G samples and peaked near 29 GB, and was only ever summarised. Percentiles
+   are exact below HIST_BINS cycles, which covers every pair this is used for. */
 pub struct BBPairStatsReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
-    pair_records: HashMap<(BB, BB), Vec<u64>>,
+    pair_records: HashMap<(BB, BB), LatencyHist>,
     prev_addr: u64,
     prev_timestamp: u64,
     prev_bb: Option<BB>,
@@ -84,7 +90,7 @@ impl BBPairStatsReceiver {
                 self.pair_records
                     .entry((prev, bb))
                     .or_default()
-                    .push(timestamp - self.prev_timestamp);
+                    .add(timestamp - self.prev_timestamp);
             }
         }
         self.prev_bb = Some(bb);
@@ -243,26 +249,23 @@ impl AbstractReceiver for BBPairStatsReceiver {
         self.writer
             .write_all(b"count,mean,min,p50,p90,p99,max,netvar,prev_bb,bb\n")
             .unwrap();
-        for ((prev, bb), intervals) in self.pair_records.iter_mut() {
-            if intervals.is_empty() || intervals.len() < self.min_count {
+        for ((prev, bb), d) in self.pair_records.iter() {
+            if d.n == 0 || (d.n as usize) < self.min_count {
                 continue;
             }
 
-            let sum: u64 = intervals.iter().sum();
-            let mean = sum as f64 / intervals.len() as f64;
-            let count = intervals.len();
-
-            intervals.sort_unstable();
-            let min = intervals[0];
-            let pct = |p: f64| -> u64 {
-                let idx = (((count as f64 - 1.0) * p).round() as usize).min(count - 1);
-                intervals[idx]
-            };
-            let p50 = pct(0.50);
-            let p90 = pct(0.90);
-            let p99 = pct(0.99);
-            let max = intervals[count - 1];
-            let netvar = sum - min * count as u64;
+            // Same summary as the Vec-based version: nearest-rank percentiles on the
+            // implied sorted sample (LatencyHist::quantile), min from the first
+            // occupied bin, netvar = sum - min*count.
+            let count = d.n;
+            let sum = d.sum;
+            let mean = sum as f64 / count as f64;
+            let min = d.min();
+            let p50 = d.quantile(0.50);
+            let p90 = d.quantile(0.90);
+            let p99 = d.quantile(0.99);
+            let max = d.max;
+            let netvar = sum.saturating_sub(min * count);
 
             self.writer
                 .write_all(
